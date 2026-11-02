@@ -142,6 +142,8 @@ $jar = Get-ChildItem "$env:USERPROFILE\.gradle\caches\fabric-loom\minecraftMaven
 | Gradle JVM 必须是 21+ | Loom 1.17 的 unpick 依赖要求 21；产物仍由 `options.release = 17` 编译 |
 | 不需要 refmap | Loom 打包时会把注解里的名字 remap 成 intermediary/SRG；改动后可用 `javap -v` 验证 |
 | `@Accessor` 的字段名也会被 remap | 别以为字符串不会被改，见 `CameraEyeHeightAccessor` |
+| Forge 拿事件总线要**构造器注入** | `FMLJavaModLoadingContext.get()` 在 47.4 已 `forRemoval`。`FMLModContainer.constructMod` 会先找 `getDeclaredConstructor(FMLJavaModLoadingContext.class)`，失败才退回无参构造——所以写成 `public FreeVisionForge(FMLJavaModLoadingContext context)` |
+| `pack.mcmeta` 放在**平台模块**而不是 common | 放 common 时 Forge 开发环境会报 `Missing metadata in pack mod:freevision`（dev 的 mod file 读不到 common 的资源目录）。放在 `fabric/`、`forge/` 各自的 `src/main/resources` 后，dev 与产物都安静，且每个 jar 里只有一个副本 |
 | Shift / Ctrl 可能是 `ToggleKeyMapping` | 开了"切换潜行/疾跑"后 `isDown()` 会一直为 true；读物理按键请用 `physicallyDown()` |
 | 别用 `isDown()` 判定模式切换 | 模式切换一律 `consumeClick()` + 去抖，且**一个 tick 只处理一次** |
 | 相机离眼睛 < 0.14 格时 `detached = false` | 否则玩家会看到自己脑袋的内壁；手模隐藏与它绑定，避免"没手也没身体" |

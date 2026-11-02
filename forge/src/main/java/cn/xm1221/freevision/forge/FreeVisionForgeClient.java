@@ -9,11 +9,15 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
  * class and its imports never resolve on a dedicated server.
  */
 public final class FreeVisionForgeClient {
-    public FreeVisionForgeClient() {
-        FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onRegisterKeyMappings);
+    private FreeVisionForgeClient() {
     }
 
-    private void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
+    /** Hooks key registration on the mod event bus handed over by the mod constructor. */
+    public static void install(FMLJavaModLoadingContext context) {
+        context.getModEventBus().addListener(FreeVisionForgeClient::onRegisterKeyMappings);
+    }
+
+    private static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         FreeVisionClient.init(event::register);
     }
 }
