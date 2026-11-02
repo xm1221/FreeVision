@@ -169,8 +169,9 @@ public static CameraPose computePose(Entity entity, Camera camera, float partial
 entity != camera.getEntity() || camera.isDetached() || ...
 ```
 
-相机实体仍然是玩家，所以必须让 `camera.detached = true`。这不是 hack：语义上它确实
-「离开了头部」。副作用是 `isDetached()` 为真，这正是我们想要的。
+相机实体仍然是玩家，所以机位一旦离开头部就置 `camera.detached = true`。这不是 hack：语义上它确实
+「离开了头部」。机位贴着双眼时（不到 0.14 格）保持 `false`，画面就退化成正常的第一人称，
+而不是让你看到自己脑袋的内壁。
 
 ### 4.2 藏掉贴着眼睛的手
 

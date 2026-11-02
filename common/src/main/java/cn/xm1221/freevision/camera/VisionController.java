@@ -37,6 +37,11 @@ public final class VisionController {
     /** Pose the current blend started from. */
     private final CameraPose blendFrom = new CameraPose();
 
+    /** Last pose actually handed to the camera, so re-grabbing mid-transition is seamless. */
+    private final CameraPose lastApplied = new CameraPose();
+
+    private boolean hasLastApplied;
+
     private long blendStartNs;
     private long blendDurationNs;
 
@@ -117,6 +122,12 @@ public final class VisionController {
         if (this.state == VisionState.LEAVING) {
             this.state = VisionState.VANILLA;
         }
+    }
+
+    /** Called by the bridge with the pose it is about to render. */
+    public void recordApplied(CameraPose pose) {
+        this.lastApplied.set(pose);
+        this.hasLastApplied = true;
     }
 
     public boolean pendingVanillaSeed() {
@@ -263,6 +274,18 @@ public final class VisionController {
 
         this.stateBeforeSculpt = this.state;
         this.blendDurationNs = 0L;
+
+        if (this.state == VisionState.LEAVING && this.hasLastApplied) {
+            // Grabbed mid-exit: keep the exact frame the player is looking at instead of snapping
+            // back to the vanilla camera first.
+            this.stateBeforeSculpt = VisionState.VANILLA;
+            this.sculptPose.set(this.lastApplied);
+            this.blendFrom.set(this.sculptPose);
+            this.state = VisionState.SCULPTING;
+            showHint("freevision.hint.sculpting", 0);
+
+            return;
+        }
 
         if (this.state == VisionState.ACTIVE) {
             CameraPose active = VisionConfig.get().activePreset();
@@ -508,6 +531,7 @@ public final class VisionController {
         this.stateBeforeSculpt = VisionState.VANILLA;
         this.pendingVanillaSeed = false;
         this.seedSculptFromVanilla = false;
+        this.hasLastApplied = false;
         this.keyWasDown = false;
         this.holdHandled = false;
         this.blendDurationNs = 0L;

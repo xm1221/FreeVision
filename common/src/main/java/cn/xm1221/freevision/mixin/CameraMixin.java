@@ -86,10 +86,13 @@ public abstract class CameraMixin {
             this.freevision$roll(pose.roll);
         }
 
-        this.setPosition(VisionCameraBridge.computePosition(entity, pose, partialTick, eye));
+        Vec3 position = VisionCameraBridge.computePosition(entity, pose, partialTick, eye);
+        this.setPosition(position);
 
-        // Let LevelRenderer know the camera left the head, so the player model is drawn.
-        this.detached = true;
+        // Let LevelRenderer know the camera left the head, so the player model is drawn. When the
+        // rig sits essentially on the eyes it is left false, which reads as a normal first-person
+        // view instead of the inside of the player's head.
+        this.detached = position.distanceToSqr(eye) > 0.02D;
     }
 
     @Unique

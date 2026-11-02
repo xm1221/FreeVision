@@ -64,10 +64,15 @@ public final class VisionCameraBridge {
                 return null;
             }
 
+            controller.recordApplied(target);
+
             return target;
         }
 
-        return CameraPose.lerp(controller.blendFrom(), target, ease(progress));
+        CameraPose blended = CameraPose.lerp(controller.blendFrom(), target, ease(progress));
+        controller.recordApplied(blended);
+
+        return blended;
     }
 
     /** Final world position for a pose, optionally pulled out of geometry. */
