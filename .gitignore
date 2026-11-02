@@ -1,0 +1,32 @@
+# Gradle / Loom
+.gradle/
+build/
+**/build/
+out/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+bin/
+
+# Minecraft dev runtime
+run/
+runs/
+
+# Local scratch (decompiled vanilla reference, tools)
+.tools/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Logs
+*.log
+hs_err_pid*
