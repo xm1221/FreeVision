@@ -1,5 +1,7 @@
 # HUMAN.md - maintainer's handbook
 
+**English** · [简体中文](HUMAN.zh-CN.md)
+
 This document is for whoever **maintains** the mod: how to build it, where things live, what breaks
 when you touch it, and how to debug it. Player-facing docs are in [README.md](README.md); the
 implementation notes are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

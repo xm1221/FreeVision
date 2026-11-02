@@ -1,5 +1,7 @@
 # FreeVision
 
+**English** · [简体中文](README.zh-CN.md)
+
 **A fourth-person camera for Minecraft: your own saved perspective, on top of the three vanilla ones.**
 
 Press a key to enter adjust mode and place the camera where you want it; press it again to save.
@@ -174,7 +176,7 @@ export JAVA_HOME=/path/to/jdk-21
 
 Development runs: `./gradlew :fabric:runClient` or `:forge:runClient`.
 
-Maintainers: read [HUMAN.md](HUMAN.md) first. Implementation notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Maintainers: read [HUMAN.md](HUMAN.md) first (Chinese: [HUMAN.zh-CN.md](HUMAN.zh-CN.md)). Implementation notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 

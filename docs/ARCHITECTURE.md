@@ -1,5 +1,7 @@
 # Architecture and API
 
+**English** · [简体中文](ARCHITECTURE.zh-CN.md)
+
 This document covers the internal structure, the per-frame data flow, and the interfaces you can rely
 on if you want to build on top of FreeVision.
 
