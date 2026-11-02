@@ -1,112 +1,120 @@
-# FreeVision · 自由视界
+# FreeVision
 
-**在原版的三种人称视角之外，给你一枚完全自定义的镜头。**
+**A fourth-person camera for Minecraft: your own saved perspective, on top of the three vanilla ones.**
 
-按一个键进入调整模式，把相机摆到你想要的机位；再按一次保存。此后按另一个键，
-随时在「原版视角」和「你的视角」之间切换。
+Press a key to enter adjust mode and place the camera where you want it; press it again to save.
+After that, a second key switches between the vanilla view and yours at any time.
 
-- **平台**：Fabric + Forge 双端（Architectury 构建，两端共用同一份 `common` 代码）
-- **版本**：Minecraft `1.20.1` / Java `17`
-- **侧别**：纯客户端。服务端不需要装，也不发任何网络包，不改动 gameplay 数据
+- **Platforms**: Fabric + Forge from one shared `common` codebase (Architectury)
+- **Version**: Minecraft `1.20.1`, Java `17`
+- **Side**: client only. Nothing is installed on the server, no packets are sent, no gameplay data changes
 
 ---
 
-## 为什么它不是自由相机
+## Why this is not a freecam
 
-自由相机（freecam）会**脱离**玩家：镜头在世界上有一个自己的坐标，玩家被留在原地，两者之间没有任何约束。
+A freecam **detaches** from the player: the camera gets its own world coordinate, the player stays
+behind, and nothing ties the two together.
 
-FreeVision 的镜头永远是**挂在玩家身上的一套机位**：
+FreeVision's camera is always a **rig bolted to the player**:
 
-| | 自由相机 | FreeVision |
+| | Freecam | FreeVision |
 |---|---|---|
-| 镜头位置 | 世界坐标，玩家走远了镜头不动 | 相对玩家的眼睛，玩家走、跑、跳、游泳、骑马都跟着 |
-| 镜头朝向 | 自己独立，玩家转头无关 | 默认跟随玩家视角朝向 + 偏移量（转头时镜头跟着绕玩家转） |
-| 交互 | 常常和准星脱节，或干脆禁用 | 准星仍在相机射线上，且被限制在玩家自身可达范围内 |
-| 存续 | 松手即结束 | 存下来，成为一个可反复启停的「视角」 |
+| Position | world coordinate; walk away and the camera stays | relative to the player's eyes; follows walking, jumping, swimming, riding |
+| Orientation | independent of the player | follows the player's look plus an offset (turning orbits the camera around them) |
+| Interaction | often decoupled from the crosshair, or disabled | the crosshair stays on the camera ray, clamped to what the player can actually reach |
+| Lifetime | ends when you let go | saved, and can be toggled on and off forever |
 
-保存下来的东西是 **六个数字 + 一个模式**（偏航、俯仰、翻滚、距离、高度、侧移、是否绝对锁定）。
-它描述的不是「相机在哪里」，而是「相机如何相对玩家摆放」——这正是它能够跟着你走的原因。
+What gets saved is **six numbers plus a mode** (yaw, pitch, roll, distance, height, side, absolute
+lock). It does not describe *where the camera is*, it describes *how the camera is placed around the
+player* - which is exactly why it can follow you.
 
 ---
 
-## 操作
+## Controls
 
-全部键位都在 `选项 → 控制 → 自由视界` 里可改，界面上显示的键名会跟着你的绑定走。
+Every binding lives in `Options -> Controls -> FreeVision`, and every hint in the mod prints the key
+you actually bound, not a hard-coded string.
 
-| 键位（默认） | 作用 |
+| Default key | Action |
 |---|---|
-| `F9` 调整视角 | 按一次：进入调整模式；再按一次：保存并进入该视角 |
-| `F8` 切换自定义视角 | 在「原版视角」与「已保存的视角」之间开关 |
-| `退格` 放弃 | 调整时丢掉这次修改（`Esc` 照常打开暂停菜单，不会被动过） |
-| `V` 镜头锁定 | 在调整或启用时，切换「跟随视线 / 镜头锁定」 |
-| `方向键` 转镜头 | 不想用鼠标时用方向键转镜头 |
-| `,` / `.` 翻滚 | 调整时让画面倾斜（荷兰角） |
-| `[` / `]` 推拉 | 没有滚轮（触控板）时前后推拉机位 |
-| `R` 归位 | 调整时把镜头放回眼睛位置 |
-| `WASD` | 调整时沿镜头自身朝向平移 |
-| `空格` / `Shift` | 调整时升降机位 |
-| `Ctrl`（疾跑键） | 调整时精调，速度降到 1/5 |
-| 鼠标滚轮 | 调整时沿视线轴推拉 |
+| `F9` Adjust perspective | press once to enter adjust mode, press again to save |
+| `F8` Switch custom perspective | toggle between the vanilla view and the saved one |
+| `Backspace` Discard | throw the current adjustment away (Esc is never intercepted) |
+| `V` View lock | while adjusting or active, toggle *follows your look* / *view lock* |
+| `Arrow keys` Turn | turn the camera without a mouse |
+| `,` / `.` Roll | Dutch angle while adjusting |
+| `[` / `]` Dolly | push/pull the rig without a scroll wheel (trackpads) |
+| `R` Reset | put the camera back at the player's eyes |
+| `WASD` | move the rig along the camera's own facing |
+| `Space` / `Shift` | raise / lower the rig |
+| `Ctrl` (sprint key) | fine adjustment, 1/5 speed |
+| Mouse wheel | dolly along the view axis |
 
-> 想换按键？直接去原版控制设置里改，提示文本会自动显示你改后的键名。
-> 调整中 `Esc` 依然打开暂停菜单，随时能进「选项 → 控制」重新绑定或退出存档。
-
----
-
-## 使用流程
-
-1. **按 `F9`** —— 进入调整模式。此刻玩家被定住，鼠标和移动键交给镜头；HUD 显示镜头数值。
-2. **摆好镜头** —— 鼠标或方向键转镜头、`WASD` 挪位置、滚轮或 `[`/`]` 推拉、`,`/`.` 翻滚、`R` 归位。
-3. **需要锁定视角时按 `V`** —— 详见下一节。
-4. **再按 `F9`** —— 保存并立刻用上这个视角（想反悔就按 `退格`，一切照旧）。
-5. 之后 **按 `F8`** 就在原版视角与它之间来回切换。
-
-没有存档时按 `F8` 不会做任何事，只会提示你先按 `F9` 调整。
+> Rebinding is done in the vanilla controls screen, and the on-screen text follows your binding.
+> Esc still opens the pause menu while adjusting, so you can always reach options or quit.
 
 ---
 
-## 镜头锁定（绝对视角）
+## Workflow
 
-默认的视角会**跟随你的视线**：你一转头，镜头就绕着你转，准星永远对着你在瞄的方向。
-这适合日常游玩，但如果你想拍一个「固定机位」——比如等比例正侧面的过场，或者俯视自己的固定角度——
-就让镜头**不再跟随视线**。
+1. **Press `F9`** - adjust mode. The player is frozen; the mouse and movement keys drive the camera,
+   and the panel shows the numbers.
+2. **Place the camera** - mouse or arrow keys to turn, `WASD` to move, wheel or `[`/`]` to dolly,
+   `,`/`.` to roll, `R` to reset.
+3. **Press `V` if you want a locked shot** - see below.
+4. **Press `F9` again** - saved, and immediately in use (press `Backspace` instead to walk away from it).
+5. From then on **`F8`** flips between the vanilla view and yours.
 
-按 `V` 切换锁定，切换的瞬间画面不会跳：它只是把「镜头朝向」从「相对你的视线」改写为「世界方向」。
-之后无论你怎么转身、怎么跑，镜头都保持同一个世界朝向，只跟着你的位置平移。
-
-- HUD 的「模式」一栏会显示当前是 `跟随视线` 还是 `镜头锁定`
-- 锁定会随视角一起保存；按 `V` 在已启用的视角上切换也会立即生效并写回配置
-- 锁定后准星仍从相机射出；命中点超出你自身手臂长度的交互会被忽略，不会有任何「隔空操作」
+Pressing `F8` before anything is saved does nothing except tell you to press `F9`.
 
 ---
 
-## 状态机
+## View lock (absolute orientation)
 
-| 当前状态 | 输入 | 结果 |
+By default the perspective **follows your look**: turn your head and the camera orbits, so the
+crosshair always points where you aim. That suits normal play, but for a fixed shot - a side-on
+cutaway, a fixed angle looking down at yourself - you want the camera to stop tracking your head.
+
+Press `V` to toggle. The picture does not jump: it rewrites the camera orientation from
+"relative to your look" to "a world direction", and from then on the camera keeps that world
+orientation while following your position.
+
+- the panel's *mode* row shows `follows your look` or `view lock`
+- the lock is saved with the perspective; pressing `V` on an active view also takes effect
+  immediately and is written back to the config
+- picking still casts from the camera, and any hit beyond your own arm length is ignored, so there is
+  never an "interact through the wall" shortcut
+
+---
+
+## State machine
+
+| State | Input | Result |
 |---|---|---|
-| `VANILLA` | `F9` | → `SCULPTING`（从当前画面起手，不跳变） |
-| `VANILLA` | `F8`（已有存档） | → `ACTIVE`，飞入保存的视角 |
-| `VANILLA` | `F8`（没有存档） | 提示先按 `F9` 调整 |
-| `SCULPTING` | 鼠标 / 移动键 / 滚轮 / 翻滚键 | 编辑六个机位数值 |
-| `SCULPTING` | `V` | 在跟随视线 / 镜头锁定之间切换（画面不跳） |
-| `SCULPTING` | `F9` 或 `F8` | 保存 → `ACTIVE` |
-| `SCULPTING` | `退格` | 放弃，回到进入前的状态 |
-| `ACTIVE` | `F8` | → `LEAVING`（220ms 平滑过渡）→ `VANILLA` |
-| `ACTIVE` | `F9` | → `SCULPTING`，在当前视角上继续微调 |
-| `ACTIVE` | `V` | 切换锁定模式并写回存档 |
-| 任意状态 | `Esc` | 正常打开暂停菜单，调整状态与数值都保留 |
+| `VANILLA` | `F9` | -> `SCULPTING`, seeded from the current frame so nothing jumps |
+| `VANILLA` | `F8` (perspective saved) | -> `ACTIVE`, flies into the saved view |
+| `VANILLA` | `F8` (nothing saved) | hint: press `F9` to adjust one |
+| `SCULPTING` | mouse / movement / wheel / roll | edit the six rig numbers |
+| `SCULPTING` | `V` | switch follows-look / view lock without moving the picture |
+| `SCULPTING` | `F9` or `F8` | save -> `ACTIVE` |
+| `SCULPTING` | `Backspace` | discard and return to the previous state |
+| `ACTIVE` | `F8` | -> `LEAVING` (220 ms blend) -> `VANILLA` |
+| `ACTIVE` | `F9` | -> `SCULPTING`, keep fine-tuning the current view |
+| `ACTIVE` | `V` | toggle the lock and write it back |
+| any | `Esc` | opens the pause menu normally; the adjustment state and numbers survive |
 
-- `SCULPTING` 期间玩家被冻结输入，原版游戏键位（丢弃、攻击、快捷栏……）全部静音，
-  退出调整后也不会有积压的点击突然触发。
-- 打开界面（暂停菜单等）时调整自然暂停输入，关掉后继续，不会丢镜头。
-- 「进/出」都用同一条 220ms 的缓动动画，起点取自觉性相机当前的真实位置——所以即使你正处在
-  原版第三人称、床上或旁观者视角，接管的一瞬间画面也不会跳。
+- While `SCULPTING` the player's input is frozen and vanilla game keys (drop, attack, hotbar...) are
+  muted, so nothing fires when you leave adjust mode either.
+- Opening a screen pauses the input naturally; closing it resumes without losing the camera.
+- Entering and leaving both use the same 220 ms eased blend, seeded from whatever the vanilla camera
+  was showing - so taking over from third person, a bed or spectator does not snap.
 
 ---
 
-## 配置文件
+## Config file
 
-`config/freevision.json`，自动生成，随时可手改：
+`config/freevision.json`, generated automatically, safe to hand-edit:
 
 ```json
 {
@@ -128,58 +136,65 @@ FreeVision 的镜头永远是**挂在玩家身上的一套机位**：
 }
 ```
 
-| 选项 | 说明 |
+| Option | Meaning |
 |---|---|
-| `sculptSpeed` | 调整时每个 tick 移动多少格 |
-| `maxOffset` | 机位可以离眼睛多远（格），防止摆出离谱的机位 |
-| `avoidClipping` | 启用视角时把相机从墙里拉出来（和原版第三人称一样），调整时不裁剪以便自由摆放 |
-| `cameraPicking` | 让准星从相机射出，而不是从玩家眼睛射出 |
-| `transitionMs` | 进出的平滑过渡时长，设为 0 即硬切 |
-| `showHud` | 总开关，关掉后不再显示任何覆盖层 |
-| `showPanel` | 调整面板（数值与按键提示） |
-| `showToasts` | 短暂的状态提示条 |
+| `sculptSpeed` | blocks moved per client tick while adjusting |
+| `maxOffset` | how far the rig may leave the eyes (blocks); keeps poses sane |
+| `avoidClipping` | pull the camera out of walls while active (like vanilla third person); off while adjusting so you can place it anywhere |
+| `cameraPicking` | cast the crosshair from the camera instead of the player's eyes |
+| `transitionMs` | blend duration for entering/leaving; 0 = hard cut |
+| `showHud` | master switch for every overlay |
+| `showPanel` | the adjusting panel (numbers and key hints) |
+| `showToasts` | short status toasts |
 
-配置改完重进游戏生效；保存的视角（`pose`）在保存时立即写盘。
-
----
-
-## 安装
-
-1. 装好 **Architectury API**（Fabric 端还需要 **Fabric API**）。
-2. 把 `freevision-fabric-1.0.0.jar` 丢进 Fabric 的 `mods/`，或 `freevision-forge-1.0.0.jar` 丢进 Forge 的 `mods/`。
-   （两个 jar 内容不同，别混装。）
-
-Forge 端声明了 `displayTest = "IGNORE_ALL_VERSION"`，客户端装了、服务端没装也可以正常进服。
+Option changes apply on the next launch; the saved perspective (`pose`) is written immediately.
 
 ---
 
-## 构建
+## Installation
+
+1. Install **Architectury API** (Fabric also needs **Fabric API**).
+2. Drop `freevision-fabric-1.0.0.jar` into Fabric's `mods/`, or `freevision-forge-1.0.0.jar` into
+   Forge's `mods/`. The two jars are different - do not mix them up.
+
+The Forge jar declares `displayTest = "IGNORE_ALL_VERSION"`, so a client with the mod can join a
+server that does not have it.
+
+---
+
+## Building
 
 ```bash
-# Gradle 本身需要 JDK 21+，产物字节码是 Java 17
+# Gradle itself needs JDK 21+; the mod is compiled to Java 17 bytecode
 export JAVA_HOME=/path/to/jdk-21
 ./gradlew build
-# 产物：fabric/build/libs/freevision-fabric-1.0.0.jar
-#       forge/build/libs/freevision-forge-1.0.0.jar
+# outputs: fabric/build/libs/freevision-fabric-1.0.0.jar
+#          forge/build/libs/freevision-forge-1.0.0.jar
 ```
 
-开发运行：`./gradlew :fabric:runClient` 或 `:forge:runClient`。
+Development runs: `./gradlew :fabric:runClient` or `:forge:runClient`.
 
-维护者请先读 [HUMAN.md](HUMAN.md)。
-
----
-
-## 已知限制
-
-- **与原版第三人称互不干扰但不叠加**：启用自定义视角时，镜头由 FreeVision 接管；此时按 `F5` 只会改变原版记录的人称状态，画面仍是你保存的机位（退出后立即生效）。
-- **不会让服务端看到任何异常**：不发送额外的移动/交互包，机位完全在客户端。
-- **交互距离**：可以从自定义机位瞄准，但命中点仍然被限制在玩家自身的手臂范围内，避免触发服务端的距离校验。
-- **镜头锁定下准星与角色朝向会分离**：这是该模式的定义，不是 bug——镜头不跟随视线，准星自然也不再代表角色面朝的方向。
-- **水下/熔岩雾效**按相机位置计算（穿墙镜头会看到墙后坐标的雾效浓度，属于原版机制）。
-- 与其它也接管相机的模组（如自由相机）同时使用时，以本模组为准。
+Maintainers: read [HUMAN.md](HUMAN.md) first. Implementation notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
-## 许可
+## Known limitations
 
-MIT。
+- **Independent of, but not additive with, vanilla third person**: while the custom perspective is
+  active, FreeVision owns the camera. Pressing `F5` only changes the vanilla camera mode; the picture
+  stays on your saved rig until you leave it.
+- **The server sees nothing unusual**: no extra movement or interaction packets; the camera is purely
+  client side.
+- **Reach**: you can aim from the custom camera, but a hit is still limited to the player's own arm
+  length, so no server-side distance check is ever tripped.
+- **Under view lock the crosshair and the body facing separate**: that is the definition of the mode,
+  not a bug - the camera ignores your look, so the crosshair no longer represents where the body faces.
+- **Water/lava fog** is computed at the camera position (a through-wall shot sees the fog density at
+  the camera's coordinates - vanilla behaviour).
+- With another mod that also owns the camera (a freecam, for instance), FreeVision wins.
+
+---
+
+## License
+
+MIT - see [LICENSE](LICENSE).

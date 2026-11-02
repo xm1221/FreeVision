@@ -1,232 +1,255 @@
-# 架构与 API
+# Architecture and API
 
-本文说明 FreeVision 的内部结构、每帧的数据流，以及如果你想在此基础上继续扩展时可以依赖的接口。
+This document covers the internal structure, the per-frame data flow, and the interfaces you can rely
+on if you want to build on top of FreeVision.
 
 ---
 
-## 0. 分层
+## 0. Layering
 
 ```
 common/  ────────────────────────────────────────────────┐
-  camera/   CameraPose  VisionState  VisionController      │ 纯逻辑：数学、状态机、混合
-            VisionCameraBridge  VisionPicker               │ 不碰渲染，可脱离游戏推演
-  config/   VisionConfig  VisionSettings                   │ 持久化（Gson → config/freevision.json）
-  client/   VisionKeybinds  VisionHud  FreeVisionClient     │ 键位、覆盖层、启动
-  mixin/    8 个注入点 + 1 个 accessor                      │ 唯一允许接触引擎内部的地方
-fabric/   FreeVisionFabric        （ClientModInitializer） │ 只管注册键位
-forge/    FreeVisionForge(-Client)（DistExecutor 隔离）     │ 只管注册键位
+  camera/   CameraPose  VisionState  VisionController      │ pure logic: maths, state, blending;
+            VisionCameraBridge  VisionPicker               │ no rendering, can be reasoned about
+  config/   VisionConfig  VisionSettings                   │ persistence (Gson -> config/freevision.json)
+  client/   VisionKeybinds  VisionHud  FreeVisionClient     │ bindings, overlay, bootstrap
+  mixin/    injection points + one accessor                 │ the only place that touches the engine
+fabric/   FreeVisionFabric        (ClientModInitializer)   │ only registers key mappings
+forge/    FreeVisionForge(-Client) (DistExecutor isolation)│ only registers key mappings
 ```
 
-设计原则：**引擎内部只在一个方向被触碰**——mixin 只做「取输入」和「写相机」两件事，
-所有判断、数学与状态都留在 `camera/` 里。这样即使某个注入点需要为新版本重写，
-业务逻辑一行都不用动。
+Design rule: **the engine is touched in exactly two ways** - mixins take input out and write the
+camera back. All decisions, maths and state live in `camera/`. If an injection point has to be
+rewritten for a new Minecraft version, no business logic moves.
 
 ---
 
-## 1. `CameraPose` —— 视角的数据模型
+## 1. `CameraPose` - the data model of a perspective
 
 ```java
 public final class CameraPose {
-    public float yawOffset;    // 相对模式下叠加到玩家视角偏航；绝对模式下就是世界偏航
-    public float pitchOffset;  // 同上
-    public float roll;         // 荷兰角
-    public double distance;    // 沿相机自身视线轴、向后的距离
-    public double height;      // 世界竖直方向的偏移
-    public double side;        // 沿相机左向量的偏移
-    public boolean absolute;   // false = 跟随玩家视线；true = 镜头锁定（世界朝向）
+    public float yawOffset;    // relative mode: added to the player's view yaw; absolute mode: world yaw
+    public float pitchOffset;  // same
+    public float roll;         // dutch angle
+    public double distance;    // backwards along the camera's own view axis
+    public double height;      // world-vertical offset
+    public double side;        // along the camera's left vector
+    public boolean absolute;   // false = tracks the player's look; true = view lock (world orientation)
 }
 ```
 
-### 坐标系
+### Coordinate frame
 
-设相机偏航 `Y`（相对模式为 `玩家视角偏航 + yawOffset`，绝对模式直接等于 `yawOffset`），则
+With camera yaw `Y` (relative mode: `player view yaw + yawOffset`; absolute mode: just `yawOffset`):
 
 ```
-back  = ( sin Y, 0, -cos Y )   // 相机视线的水平反向
-left  = ( cos Y, 0,  sin Y )   // 相机的左向量
-eye   = 玩家插值后的眼睛位置
+back  = ( sin Y, 0, -cos Y )   // opposite the camera's horizontal view direction
+left  = ( cos Y, 0,  sin Y )   // the camera's left vector
+eye   = the player's interpolated eye position
 
 cameraPos   = eye + back*distance + left*side + (0, height, 0)
 cameraYaw   = Y
-cameraPitch = 相对：clamp(玩家俯仰 + pitchOffset) ｜ 绝对：clamp(pitchOffset)
+cameraPitch = relative: clamp(player pitch + pitchOffset) | absolute: clamp(pitchOffset)
 ```
 
-三个后果，也是整个设计的核心：
+Three consequences, and they are the whole design:
 
-1. **偏航随玩家走**（相对模式）。玩家在 `ACTIVE` 状态转头，`Y` 同步变化，机位绕玩家旋转——
-   这就是第三人称相机的手感，而不是镜头被钉死在世界某处。
-2. **俯仰是叠加的**（相对模式），所以准星方向始终等于玩家的瞄准方向。
-3. **所有分量都被 `clamp()` 关在 `maxOffset` 的盒子里**，再怎么摆也摆不出一个离谱的机位。
+1. **Yaw follows the player** (relative mode). Turning in `ACTIVE` changes `Y`, so the rig orbits the
+   player - third-person camera feel, not a camera pinned to a world position.
+2. **Pitch is additive** (relative mode), so the crosshair direction always equals the player's aim.
+3. **Every component is clamped into `maxOffset`**, so no pose can be absurd.
 
-### 两种旋转模式与 `convertMode`
+### Two rotation modes and `convertMode`
 
-`absolute = true` 时 `yawOffset/pitchOffset` 改为表示**世界角度**，镜头不再跟随视线，只跟随位置。
-这条切换由 `convertMode(targetAbsolute, viewYaw, viewPitch)` 完成，它在**当前这一帧**把数值改写过去，
-所以切换瞬间画面完全不动，只是此后镜头的行为变了。`VisionController#toggleLock` 负责调用它。
+With `absolute = true`, `yawOffset`/`pitchOffset` become **world angles**: the camera stops tracking
+the look direction and only follows the position. `convertMode(targetAbsolute, viewYaw, viewPitch)`
+rewrites the numbers at the **current frame**, so the picture does not move at the switch - only the
+tracking rule changes afterwards. `VisionController#toggleLock` calls it.
 
-### `fromWorld(...)`：把任意原版相机折算成 rig
+### `fromWorld(...)`: folding any vanilla camera into a rig
 
 ```java
 CameraPose.fromWorld(eye, cameraPos, viewYaw, viewPitch, cameraYaw, cameraPitch, absolute)
 ```
 
-把世界坐标相机投影回上面那套基向量（`distance = dx·back`、`side = dx·left`、`height = dx.y`），
-用途有两个：
+Projects a world-space camera back onto the basis above (`distance = dx·back`, `side = dx·left`,
+`height = dx.y`). Two uses:
 
-- **进入调整 / 启用视角时**：玩家正处在原版第三人称、躺床或旁观者视角，接管的一瞬间画面不跳。
-- **离开视角时**：混合动画的终点永远精确等于这一帧的原版画面。
+- **entering adjust mode / activating**: the player may be in vanilla third person, in bed or in
+  spectator, and the takeover must not snap;
+- **leaving**: the blend's destination must be exactly the vanilla frame.
 
-`lerp()` 对偏航用最短弧，所以 350°→10° 只走 20°。**两个端点必须处于同一模式**，
-相机桥在插值前会用 `convertMode` 把起点改写过去。
+`lerp()` uses shortest-arc yaw, so 350° -> 10° travels 20°. **Both endpoints must share a mode**; the
+camera bridge converts the origin first.
 
 ---
 
-## 2. `VisionState` + `VisionController` —— 状态机
+## 2. `VisionState` + `VisionController` - the state machine
 
 ```java
-VANILLA ──(F9 调整)──▶ SCULPTING ──(F9/F8 保存)──▶ ACTIVE ──(F8 切换)──▶ LEAVING ──▶ VANILLA
-                            └────────(丢弃键 放弃)────────▶ 回到进入前的状态
+VANILLA --(F9 adjust)--> SCULPTING --(F9/F8 save)--> ACTIVE --(F8 toggle)--> LEAVING --> VANILLA
+                              └──────(discard key)──────> back to the previous state
 ```
 
-**调整是显式的模式，不是"按住"**：按一次进入、再按一次保存、丢弃键放弃。这样玩家可以慢慢看 HUD、
-可以中途去改设置、也不会因为手滑松键就把机位丢了。`LEAVING` 是真实状态而非标志位，
-让「已经切走、但还在退场动画里」的这段时间走同一套求值路径，动画结束时不需要任何对齐补帧。
+**Adjusting is an explicit mode, not a hold**: press once to enter, press again to save, discard key to
+throw it away. The player can read the panel, go change settings, or alt-tab without losing the pose.
+`LEAVING` is a real state rather than a flag, so "already switched away but still blending" goes
+through the same evaluation path and needs no alignment correction at the end.
 
-### 输入的三层接管
+### Three input takeovers
 
-| 输入 | 接管点 | 效果 |
+| Input | Hook | Effect |
 |---|---|---|
-| 鼠标 | `Entity#turn` HEAD，`cancel()` | 原版已算好灵敏度/反转/平滑/开镜减速，直接喂给 `handleMouseTurn`；`cancel` 掉所以身体不转 |
-| 键盘移动 | `KeyboardInput#tick` TAIL | 把 `up/down/left/right/jumping/shiftKeyDown` 清零；原始按键仍从 `Options.keyUp` 读给镜头用 |
-| 游戏键位 | `Minecraft#handleKeybinds` HEAD，`cancel()` | 调整期间不丢物品、不出手、不切 F5；同时排空**全部** `Options.keyMappings` 的点击，退出后不会补触发 |
+| Mouse | `Entity#turn` HEAD, `cancel()` | vanilla already applied sensitivity / invert / smoothing / scope slowdown; the finished deltas go to `handleMouseTurn`, and cancelling keeps the body still |
+| Movement keys | `KeyboardInput#tick` TAIL | zeroes `up/down/left/right/jumping/shiftKeyDown`; the raw keys are still read from `Options.keyUp` for the rig |
+| Gameplay keys | `Minecraft#handleKeybinds` HEAD, `cancel()` | no dropping, no attacking, no F5 while adjusting; every click in `Options.keyMappings` is drained so nothing fires later |
 
-**`Esc` 完全不被拦截**，任何时候都能打开暂停菜单（无障碍复审的硬要求：上一版把 Esc 当"放弃"，
-玩家在调整模式里既开不了设置也退不了存档）。放弃改由独立的丢弃键完成。
-界面打开时编辑模式自然暂停输入（`KeyMapping` 被原版释放），关掉界面后接着调；
-`VisionController#tick` 在 `screen != null` 时直接返回，不会隔着界面对状态做任何改动。
+**Esc is never intercepted**, so the pause menu always opens (a hard requirement from the
+accessibility review: the previous version used Esc as "discard" and left players unable to reach
+options or quit). Discarding has its own key. While a screen is open the editor simply pauses
+(vanilla releases the `KeyMapping`s) and resumes when it closes; `VisionController#tick` returns early
+whenever `screen != null`, so nothing changes state behind a GUI.
 
-### 键位
+### Bindings
 
-全部是原生 `KeyMapping`，在控制设置里可改；提示文本一律通过
-`KeyMapping#getTranslatedKeyMessage()` 取**玩家实际绑定的键名**，从不硬编码 "F8"。
+All native `KeyMapping`s, rebindable in the controls screen. Every hint resolves the **player's actual
+key** through `KeyMapping#getTranslatedKeyMessage()`; "F8" is never hard-coded.
 
-| 常量 | 默认 | 语义 |
+| Field | Default | Meaning |
 |---|---|---|
-| `vision` | F8 | 开关已保存视角 |
-| `edit` | F9 | 进入调整 / 保存 |
-| `lock` | V | 切换镜头锁定（绝对视角） |
-| `rollLeft` / `rollRight` | `,` / `.` | 翻滚 |
-| `reset` | R | 机位归位 |
+| `vision` | F8 | toggle the saved perspective |
+| `edit` | F9 | enter adjusting / save |
+| `lock` | V | toggle view lock (absolute orientation) |
+| `discard` | Backspace | throw the adjustment away |
+| `lookUp/Down/Left/Right` | arrows | turn without a mouse |
+| `dollyIn/Out` | `[` `]` | push/pull without a wheel |
+| `rollLeft/rollRight` | `,` `.` | roll |
+| `reset` | R | put the rig back at the eyes |
 
 ---
 
-## 3. `VisionCameraBridge` —— 每帧一次的解算
+## 3. `VisionCameraBridge` - one solve per frame
 
-`Camera#setup` 每帧跑一次，注入点在其 TAIL。此刻 `camera.getPosition()/getYRot()/getXRot()`
-是**原版刚算出来的**值，我们随后整个覆盖。
+`Camera#setup` runs once per frame and the injection sits at its TAIL. At that moment
+`camera.getPosition()/getYRot()/getXRot()` hold the **values vanilla just computed**, and we replace
+them wholesale.
 
 ```java
 public static CameraPose computePose(Entity entity, Camera camera, float partialTick, Vec3 eye)
 ```
 
-流程：
+Flow:
 
-1. 状态是 `VANILLA` → 返回 `null`，一个字节都不碰。
-2. 若有一次待落地的「从当前画面开始」的过渡（`pendingVanillaSeed`），把刚才那组原版值折算成 rig。
-3. `LEAVING` 的目标是**这一帧的原版相机**；其它状态的目标是 `targetPose()`。
-4. 若起点与目标的旋转模式不同，先把起点 `convertMode` 到目标的模式。
-5. `progress ≥ 1` 直接返回目标；`LEAVING` 则返回 `null` 并把状态收成 `VANILLA`。
-6. 否则 `lerp(from, target, smoothstep(progress))`，并 `recordApplied(pose)` 供下一次无缝接续。
+1. `VANILLA` -> return `null`, touch nothing.
+2. `LEAVING` targets **this frame's vanilla camera**; other states target `targetPose()`.
+3. If the origin and destination modes differ, `convertMode` the origin first.
+4. `progress >= 1` returns the target; for `LEAVING` it returns `null` and collapses the state to
+   `VANILLA`.
+5. Otherwise `lerp(from, target, smoothstep(progress))` and `recordApplied(pose)` so the next takeover
+   is seamless.
 
-**混合发生在 rig 空间而不是世界空间**，所以动画过程中玩家走动、转身都不会让镜头「追不上」。
-`smoothstep(t) = t²(3-2t)` 两端导数为 0；进度用墙上时钟，卡帧也不会让动画提速。
+**Blending happens in rig space, not world space**, so walking or turning mid-animation cannot make the
+camera lag. `smoothstep(t) = t²(3-2t)` has zero derivative at both ends; progress uses wall-clock time,
+so a frame spike cannot speed the animation up.
 
-### 遮挡裁剪
+### Occlusion clipping
 
-`computePosition()` 在 `ACTIVE` / `LEAVING`（且 `avoidClipping` 开启）时，从眼睛到机位做一次
-`ClipContext.Block.VISUAL` 射线，撞到方块就把机位收到命中点前 0.15 格。`SCULPTING` 不裁剪，
-方便你把机位摆进任何地方先看清楚。
+`computePosition()` casts a `ClipContext.Block.VISUAL` ray from the eyes to the rig in `ACTIVE` /
+`LEAVING` (when `avoidClipping` is on) and pulls the camera 0.15 blocks in front of the hit. `SCULPTING`
+does not clip, so you can place the camera anywhere while working.
 
 ---
 
-## 4. 渲染侧的三件事
+## 4. The render side
 
-### 4.1 让玩家自己出现在画面里
+### 4.1 Letting the player appear on screen
 
-`LevelRenderer` 只在这个条件下才渲染「当前相机实体」：
+`LevelRenderer` renders "the camera entity" only under this condition:
 
 ```java
 entity != camera.getEntity() || camera.isDetached() || ...
 ```
 
-相机实体仍然是玩家，所以机位一旦离开头部就置 `camera.detached = true`。机位贴着双眼时（不到 0.14 格）
-保持 `false`，画面退化成正常第一人称，而不是让你看到自己脑袋的内壁。
+The camera entity is still the player, so once the rig leaves the head we set `camera.detached = true`.
+Within 0.14 blocks it stays `false`, which degrades to a normal first-person view instead of showing the
+inside of the player's head.
 
-### 4.2 藏掉贴着眼睛的手
+### 4.2 Hiding the hand and the screen effects
 
-`GameRenderer#renderItemInHand` 整段 `cancel()`（同时带走一帧的投影矩阵重置，无害），
-南瓜模糊、望远镜边框这类贴屏特效由 `GuiOverlayMixin` 在各自方法的 HEAD 处 `cancel()`，
-两者都只在「镜头真的离开头部」时生效。**不改 `Options` 的真实值**，玩家的 F5 设置原样保留。
+`GameRenderer#renderItemInHand` is cancelled outright (it also drops one frame of projection reset,
+which is harmless). Pumpkin blur, spyglass frame and the snow/frost outline are cancelled by
+`GuiOverlayMixin` at the HEAD of their own methods. Both only act when the camera really left the head.
+**`Options` is never mutated**, so the player's F5 setting is untouched.
 
-### 4.3 准星
+### 4.3 Crosshair
 
-`GameRenderer#pick` 的 TAIL 里重做一次拾取（`VisionPicker`）：从相机位置沿相机视线打 4.5 格
-（创造/旁观按原版 5/6 格），方块用 `Block.OUTLINE`、实体用 `ProjectileUtil.getEntityHitResult`，取更近者。
-**安全边界**：命中点如果离玩家眼睛超过原版手长，直接放弃、保留原版结果——永远不会发出服务端会拒绝的交互。
+`GameRenderer#pick` gets a TAIL injection that redoes the pick (`VisionPicker`): a 4.5 block ray from
+the camera along its view direction (5/6 in creative/spectator, per vanilla), `Block.OUTLINE` for
+blocks and `ProjectileUtil.getEntityHitResult` for entities, whichever is closer.
+**Safety boundary**: a hit farther from the player's eyes than vanilla reach is discarded and the
+vanilla result is kept - an interaction the server would reject is never sent.
 
-### 4.4 HUD：唯一一处刻意不用 mixin 的地方
+### 4.4 HUD: the one place that deliberately avoids a mixin
 
-HUD 走 Architectury 的 `ClientGuiEvent.RENDER_HUD`，而不是注入 `Gui#render`。
+The HUD registers on Architectury's `ClientGuiEvent.RENDER_HUD` instead of injecting into `Gui#render`.
 
-原因不是偷懒，是被 Forge 教做人：Forge 把 `Minecraft.gui` 换成了
-`net.minecraftforge.client.gui.overlay.ForgeGui`，它**重写了 `render` 且不再调用 `Gui#render`**。
-任何挂在 `Gui#render` 上的注入在 Forge 端都是死代码——不报错、不崩溃、就是不显示，最难查。
-`ClientGuiEvent.RENDER_HUD` 在 Forge 侧由 `RenderGuiEvent.Post` 驱动、在 Fabric 侧由 Architectury 自己的
-注入驱动，两端都能拿到 `GuiGraphics`，是本项目里唯一一个真正跨平台的绘制入口。
+This is not laziness, it is Forge: Forge replaces `Minecraft.gui` with
+`net.minecraftforge.client.gui.overlay.ForgeGui`, which **overrides `render` and never calls
+`Gui#render`**. Anything injected into `Gui#render` is dead code there - no error, no crash, just
+nothing drawn, which is the worst kind of bug to find. `ClientGuiEvent.RENDER_HUD` is driven by
+`RenderGuiEvent.Post` on Forge and by Architectury's own hook on Fabric, and both hand over a
+`GuiGraphics`; it is the only genuinely cross-platform drawing entry point in this project.
 
-`GuiOverlayMixin` 用 `@Inject`（**不用 `@Redirect`**，原因见下）在 Fabric 上压掉南瓜/望远镜/粉雪贴屏特效；
-Forge 的这些装饰由它自己的 overlay 系统绘制，属于已知的端差异。
+`GuiOverlayMixin` uses `@Inject` (**not `@Redirect`**, see below) to suppress the pumpkin/spyglass/snow
+overlays on Fabric. Forge draws those through its own overlay system, which is a known platform
+difference.
 
-> 为什么不写 `@Redirect`：MixinExtras 0.5.4 里 `FactoryRedirectWrapperMixinTransformer` 会把 `@Redirect` 的
-> `at` 直接强转成 `AnnotationNode`，而 javac 对数组型元素写的是列表，于是 `ClassCastException` 让目标类转换失败
-> ——装进任何一个捆了该版本的整合包就直接启动崩溃。本项目所有注入都只用 `@Inject` + `@At`。
+> Why no `@Redirect`: MixinExtras 0.5.4's `FactoryRedirectWrapperMixinTransformer` casts the `at` value
+> straight to `AnnotationNode`, while javac stores that array-typed element as a list - the resulting
+> `ClassCastException` fails the target class transformation and the game refuses to start. Every
+> injection in this project uses `@Inject` + `@At` only.
 
 ---
 
-## 5. 注入点总表
+## 5. Injection points
 
-| Mixin | 目标 | 位置 | 作用 |
+| Mixin | Target | Position | Purpose |
 |---|---|---|---|
-| `CameraMixin` | `Camera#setup` | TAIL | 写入机位与翻滚，按需置 `detached` |
-| `CameraEyeHeightAccessor` | `Camera` 字段 | — | 读原版平滑眼高 |
-| `EntityTurnMixin` | `Entity#turn` | HEAD/cancel | 鼠标转镜头，身体不动 |
-| `KeyboardInputMixin` | `KeyboardInput#tick` | TAIL | 冻结玩家移动 |
-| `MinecraftMixin` | `Minecraft#tick` | HEAD | 驱动状态机 |
-| `MinecraftMixin` | `Minecraft#handleKeybinds` | HEAD/cancel | 静音游戏键位 |
-| `GameRendererMixin` | `GameRenderer#pick` | TAIL | 相机准星 |
-| `GameRendererMixin` | `GameRenderer#renderItemInHand` | HEAD/cancel | 藏掉第一人称手/遮罩 |
-| `GameRendererMixin` | `GameRenderer#bobView` | HEAD/cancel | 关掉跑动视角抖动 |
-| `GuiOverlayMixin` | `Gui#renderSpyglassOverlay` / `#renderTextureOverlay` | HEAD/cancel | 第一人称贴屏特效（仅 Fabric，见下） |
-| `MouseHandlerMixin` | `MouseHandler#onScroll` | HEAD/cancel | 滚轮推拉机位 |
+| `CameraMixin` | `Camera#setup` | TAIL | write the pose and roll, set `detached` |
+| `CameraEyeHeightAccessor` | `Camera` fields | - | read vanilla's smoothed eye height |
+| `EntityTurnMixin` | `Entity#turn` | HEAD/cancel | mouse turns the camera, not the body |
+| `KeyboardInputMixin` | `KeyboardInput#tick` | TAIL | freeze player movement |
+| `MinecraftMixin` | `Minecraft#tick` | HEAD | drive the state machine |
+| `MinecraftMixin` | `Minecraft#handleKeybinds` | HEAD/cancel | mute gameplay keys |
+| `GameRendererMixin` | `GameRenderer#pick` | TAIL | camera-space crosshair |
+| `GameRendererMixin` | `GameRenderer#renderItemInHand` | HEAD/cancel | hide the first-person hand |
+| `GameRendererMixin` | `GameRenderer#bobView` | HEAD/cancel | drop view bobbing |
+| `GuiOverlayMixin` | `Gui#renderSpyglassOverlay` / `#renderTextureOverlay` | HEAD/cancel | first-person screen effects (Fabric only) |
+| `MouseHandlerMixin` | `MouseHandler#onScroll` | HEAD/cancel | wheel dolly |
 
-翻滚在 `Camera#setRotation`（只认 yaw/pitch）之后，绕相机局部 Z 轴再旋转四元数一次，
-并重新推导 `forwards/up/left`。
-
----
-
-## 6. 可以怎么往下扩展
-
-- **保存位扩展**：`VisionConfig` 只有一个 `pose`；想做多套预设，把它换成列表即可，状态机不用动。
-- **固定俯仰的过场机位**：用绝对锁定 + 指定 `pitchOffset` 即可，不需要改代码。
-- **跟随缓动**：在 `CameraPose#position()` 加时间常数做指数平滑；注意 `VisionPicker` 的射线段共享这个位置。
-- **新状态**：加进 `VisionState` 与 `VisionController#targetPose()`，渲染侧一行都不用改。
+Roll is applied after `Camera#setRotation` (which only knows yaw and pitch) by rotating the quaternion
+around the camera's local Z axis and re-deriving `forwards/up/left`.
 
 ---
 
-## 7. 平台差异备忘
+## 6. Extending it
 
-- **不需要 refmap**：Loom 的 tiny-remapper mixin 扩展在打包时把注解里的名字直接改写成目标平台名
-  （Fabric → `method_xxxxx` / `field_xxxxx`，Forge → `m_xxxxx_` / `f_xxxxx_`）。已核对两个 jar 的字节码。
-- **Fabric**：`fabric.mod.json` 声明 `environment: client`，专用服务器不会加载。
-- **Forge**：1.20.1 的 `@Mod` 没有 `dist` 参数，客户端部分通过 `DistExecutor.unsafeRunWhenOn`
-  隔离在 `FreeVisionForgeClient` 里，专用服务器永远不会链接到客户端类。
+- **More saved perspectives**: `VisionConfig` holds one `pose`; turn it into a list and the state
+  machine does not need to change.
+- **A fixed-pitch cutaway**: view lock plus a chosen `pitchOffset`, no code needed.
+- **Soft follow**: add a time constant in `CameraPose#position()` for exponential smoothing; note that
+  `VisionPicker` shares that position, so keep them in sync.
+- **A new state**: add it to `VisionState` and `VisionController#targetPose()`; the render side needs
+  no changes.
+
+---
+
+## 7. Platform notes
+
+- **No refmap**: Loom's tiny-remapper mixin extension rewrites the names inside the annotations to the
+  target platform's names at packaging time (Fabric -> `method_xxxxx` / `field_xxxxx`, Forge ->
+  `m_xxxxx_` / `f_xxxxx_`). Verified against both shipped jars.
+- **Fabric**: `fabric.mod.json` declares `environment: client`, so a dedicated server never loads it.
+- **Forge**: 1.20.1's `@Mod` has no `dist` parameter, so the client half is isolated behind
+  `DistExecutor.unsafeRunWhenOn` in `FreeVisionForgeClient`; a dedicated server never links the client
+  classes.
