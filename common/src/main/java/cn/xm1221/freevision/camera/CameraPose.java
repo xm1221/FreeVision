@@ -147,9 +147,12 @@ public final class CameraPose {
 
     /** Camera world position for this rig. */
     public Vec3 position(Entity player, float partialTick) {
-        Vec3 eye = player.getEyePosition(partialTick);
-        float yaw = this.cameraYaw(player, partialTick);
-        double radians = Math.toRadians(yaw);
+        return this.position(player.getEyePosition(partialTick), this.cameraYaw(player, partialTick));
+    }
+
+    /** Camera world position for this rig, given an explicit (already smoothed) eye position. */
+    public Vec3 position(Vec3 eye, float cameraYaw) {
+        double radians = Math.toRadians(cameraYaw);
         double backX = Math.sin(radians);
         double backZ = -Math.cos(radians);
         double leftX = Math.cos(radians);

@@ -190,18 +190,22 @@ public final class VisionController {
     }
 
     private void handleSlotKeys(VisionConfig config) {
-        if (VisionKeybinds.nextSlot != null && VisionKeybinds.nextSlot.consumeClick()) {
-            int slot = config.cycleSlot(1);
-            config.save();
-
-            if (this.state == VisionState.ACTIVE) {
-                this.blendFrom.set(this.sculptPose);
-                startTransition(config);
-            }
-
-            this.hintSlot = slot + 1;
-            showHint("freevision.hint.slot", 1200);
+        if (VisionKeybinds.nextSlot == null || !VisionKeybinds.nextSlot.consumeClick()) {
+            return;
         }
+
+        CameraPose previous = config.activePreset();
+        int slot = config.cycleSlot(1);
+        config.save();
+
+        if (this.state == VisionState.ACTIVE) {
+            // Blend from the pose that is on screen right now, not from the newly selected one.
+            this.blendFrom.set(previous != null ? previous : this.sculptPose);
+            startTransition(config);
+        }
+
+        this.hintSlot = slot + 1;
+        showHint("freevision.hint.slot", 1200);
     }
 
     private void handleMainKey(Minecraft minecraft, VisionConfig config, VisionSettings settings) {
@@ -299,13 +303,21 @@ public final class VisionController {
         config.storeActiveSlot(this.sculptPose);
         config.save();
 
-        this.state = VisionState.ACTIVE;
-        this.stateBeforeSculpt = VisionState.ACTIVE;
         this.blendFrom.set(this.sculptPose);
-        this.blendDurationNs = 0L;
-
         click(config, 1.5F);
-        showHint("freevision.hint.saved", 1400);
+
+        if (config.settings.enterOnSave) {
+            this.state = VisionState.ACTIVE;
+            this.stateBeforeSculpt = VisionState.ACTIVE;
+            this.blendDurationNs = 0L;
+            showHint("freevision.hint.saved", 1400);
+        } else {
+            // Faithful to the "save it, then short-press to enter it" flow: hand the camera back.
+            this.state = VisionState.LEAVING;
+            this.stateBeforeSculpt = VisionState.VANILLA;
+            startTransition(config);
+            showHint("freevision.hint.saved_enter", 2200);
+        }
     }
 
     private void activate() {

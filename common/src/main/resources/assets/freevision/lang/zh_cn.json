@@ -21,6 +21,7 @@
   "freevision.hud.draft_hint": "短按保存 · 按住继续调整 · Esc 放弃",
 
   "freevision.hint.saved": "视角已保存",
+  "freevision.hint.saved_enter": "视角已保存——短按键位进入",
   "freevision.hint.no_preset": "还没有保存过视角——按住键位开始调整",
   "freevision.hint.slot": "视角槽位 %s",
   "freevision.hint.reset": "机位已归位到双眼",

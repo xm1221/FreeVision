@@ -21,10 +21,11 @@
   "freevision.hud.draft_hint": "tap the key to save · hold to keep sculpting · Esc to discard",
 
   "freevision.hint.saved": "Perspective saved",
-  "freevision.hint.no_preset": "No perspective yet — hold the key to sculpt one",
+  "freevision.hint.saved_enter": "Perspective saved - tap the key to enter it",
+  "freevision.hint.no_preset": "No perspective yet - hold the key to sculpt one",
   "freevision.hint.slot": "Perspective slot %s",
   "freevision.hint.reset": "Rig reset to the player's eyes",
   "freevision.hint.cancelled": "Sculpt discarded",
-  "freevision.hint.sculpting": "Sculpting — release to preview",
-  "freevision.hint.draft": "Perspective ready — tap to save"
+  "freevision.hint.sculpting": "Sculpting - release to preview",
+  "freevision.hint.draft": "Perspective ready - tap to save"
 }

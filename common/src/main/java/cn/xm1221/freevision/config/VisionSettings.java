@@ -22,6 +22,12 @@ public final class VisionSettings {
     /** Smoothly fly between the vanilla camera and the custom one. */
     public boolean smoothTransitions = true;
 
+    /**
+     * After saving a draft, immediately switch into the saved view.
+     * Default {@code false}: saving returns to the vanilla view, and the next short press enters it.
+     */
+    public boolean enterOnSave = false;
+
     /** Pull the custom camera out of walls/solids like vanilla third person does. */
     public boolean avoidClipping = true;
 

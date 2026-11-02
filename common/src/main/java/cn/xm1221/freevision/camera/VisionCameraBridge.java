@@ -2,6 +2,7 @@ package cn.xm1221.freevision.camera;
 
 import cn.xm1221.freevision.config.VisionConfig;
 import net.minecraft.client.Camera;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.HitResult;
@@ -21,17 +22,17 @@ public final class VisionCameraBridge {
     /**
      * @param entity      the camera entity
      * @param camera      the camera, already set up by vanilla for this frame
+     * @param eye         interpolated eye position (using the camera's smoothed eye height)
      * @param partialTick render interpolation factor
      * @return the rig pose to apply, or {@code null} to leave vanilla's camera untouched
      */
-    public static CameraPose computePose(Entity entity, Camera camera, float partialTick) {
+    public static CameraPose computePose(Entity entity, Camera camera, float partialTick, Vec3 eye) {
         VisionController controller = VisionController.get();
 
         if (!controller.isOverriding()) {
             return null;
         }
 
-        Vec3 eye = entity.getEyePosition(partialTick);
         float viewYaw = entity.getViewYRot(partialTick);
         float viewPitch = entity.getViewXRot(partialTick);
         Vec3 vanillaPosition = camera.getPosition();
@@ -70,16 +71,16 @@ public final class VisionCameraBridge {
     }
 
     /** Final world position for a pose, optionally pulled out of geometry. */
-    public static Vec3 computePosition(Entity entity, CameraPose pose, float partialTick) {
-        Vec3 desired = pose.position(entity, partialTick);
+    public static Vec3 computePosition(Entity entity, CameraPose pose, float partialTick, Vec3 eye) {
+        Vec3 desired = pose.position(eye, pose.cameraYaw(entity, partialTick));
         VisionState state = VisionController.get().state();
-        boolean smooth = state == VisionState.ACTIVE || state == VisionState.LEAVING;
+        boolean applied = state == VisionState.ACTIVE || state == VisionState.LEAVING;
 
-        if (!smooth || !VisionConfig.get().settings.avoidClipping) {
+        if (!applied || !VisionConfig.get().settings.avoidClipping) {
             return desired;
         }
 
-        return clip(entity, entity.getEyePosition(partialTick), desired);
+        return clip(entity, eye, desired);
     }
 
     /**
@@ -111,7 +112,7 @@ public final class VisionCameraBridge {
 
     /** Smoothstep easing; the derivative is zero at both ends so the fly-in never snaps. */
     public static float ease(float delta) {
-        float clamped = Math.max(0.0F, Math.min(1.0F, delta));
+        float clamped = Mth.clamp(delta, 0.0F, 1.0F);
 
         return clamped * clamped * (3.0F - 2.0F * clamped);
     }

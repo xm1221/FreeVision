@@ -3,6 +3,7 @@ package cn.xm1221.freevision.mixin;
 import cn.xm1221.freevision.camera.CameraPose;
 import cn.xm1221.freevision.camera.VisionCameraBridge;
 import net.minecraft.client.Camera;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.phys.Vec3;
@@ -64,7 +65,16 @@ public abstract class CameraMixin {
     @Inject(method = "setup", at = @At("TAIL"))
     private void freevision$applyCustomPerspective(BlockGetter level, Entity entity, boolean thirdPerson,
             boolean reversed, float partialTick, CallbackInfo callbackInfo) {
-        CameraPose pose = VisionCameraBridge.computePose(entity, (Camera) (Object) this, partialTick);
+        CameraEyeHeightAccessor eyeHeight = (CameraEyeHeightAccessor) (Object) this;
+
+        // Same interpolated eye anchor vanilla uses, so crouching/swimming stays soft.
+        Vec3 eye = new Vec3(
+                Mth.lerp(partialTick, entity.xo, entity.getX()),
+                Mth.lerp(partialTick, entity.yo, entity.getY())
+                        + Mth.lerp(partialTick, eyeHeight.freevision$eyeHeightOld(), eyeHeight.freevision$eyeHeight()),
+                Mth.lerp(partialTick, entity.zo, entity.getZ()));
+
+        CameraPose pose = VisionCameraBridge.computePose(entity, (Camera) (Object) this, partialTick, eye);
 
         if (pose == null) {
             return;
@@ -76,7 +86,7 @@ public abstract class CameraMixin {
             this.freevision$roll(pose.roll);
         }
 
-        this.setPosition(VisionCameraBridge.computePosition(entity, pose, partialTick));
+        this.setPosition(VisionCameraBridge.computePosition(entity, pose, partialTick, eye));
 
         // Let LevelRenderer know the camera left the head, so the player model is drawn.
         this.detached = true;
