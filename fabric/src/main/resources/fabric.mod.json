@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "freevision",
+  "version": "${version}",
+  "name": "FreeVision",
+  "description": "A fourth-person camera: hold a key to sculpt a custom perspective with WASD and the mouse, save it, then tap the key to play from that angle. Player-relative, never a free cam.",
+  "authors": [
+    "xm1221"
+  ],
+  "contact": {
+    "homepage": "https://github.com/",
+    "sources": "https://github.com/"
+  },
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "cn.xm1221.freevision.fabric.FreeVisionFabric"
+    ]
+  },
+  "mixins": [
+    "freevision.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.20.1",
+    "java": ">=17",
+    "architectury": ">=9.2.14",
+    "fabric-api": "*"
+  }
+}

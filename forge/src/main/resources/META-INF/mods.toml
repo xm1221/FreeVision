@@ -1,0 +1,35 @@
+modLoader = "javafml"
+loaderVersion = "[47,)"
+license = "MIT"
+
+[[mods]]
+modId = "freevision"
+version = "${version}"
+displayName = "FreeVision"
+authors = "xm1221"
+description = '''
+A fourth-person camera: hold a key to sculpt a custom perspective with WASD and the mouse, save it,
+then tap the key to play from that angle. Player-relative, never a free cam.
+'''
+displayTest = "IGNORE_ALL_VERSION"
+
+[[dependencies.freevision]]
+modId = "forge"
+mandatory = true
+versionRange = "[47,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.freevision]]
+modId = "minecraft"
+mandatory = true
+versionRange = "[1.20.1,1.20.2)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.freevision]]
+modId = "architectury"
+mandatory = true
+versionRange = "[9.2.14,)"
+ordering = "AFTER"
+side = "BOTH"
