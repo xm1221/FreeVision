@@ -1,0 +1,30 @@
+{
+  "key.categories.freevision": "FreeVision",
+  "freevision.key.vision": "Custom perspective (tap: toggle, hold: sculpt)",
+  "freevision.key.next_slot": "Next perspective slot",
+  "freevision.key.roll_left": "Sculpt: roll left",
+  "freevision.key.roll_right": "Sculpt: roll right",
+  "freevision.key.reset": "Sculpt: reset rig to eyes",
+
+  "freevision.hud.active": "FreeVision  ·  perspective %s",
+  "freevision.hud.active_hint": "Tap the key to return to vanilla view",
+  "freevision.hud.sculpting": "FreeVision  ·  sculpting",
+  "freevision.hud.yaw": "yaw",
+  "freevision.hud.pitch": "pitch",
+  "freevision.hud.roll": "roll",
+  "freevision.hud.distance": "dist",
+  "freevision.hud.height": "height",
+  "freevision.hud.side": "side",
+  "freevision.hud.controls": "WASD move · Space/Shift lift · Ctrl fine · wheel dolly",
+  "freevision.hud.release": "release the key to preview · Esc discards",
+  "freevision.hud.draft": "Perspective ready",
+  "freevision.hud.draft_hint": "tap the key to save · hold to keep sculpting · Esc to discard",
+
+  "freevision.hint.saved": "Perspective saved",
+  "freevision.hint.no_preset": "No perspective yet — hold the key to sculpt one",
+  "freevision.hint.slot": "Perspective slot %s",
+  "freevision.hint.reset": "Rig reset to the player's eyes",
+  "freevision.hint.cancelled": "Sculpt discarded",
+  "freevision.hint.sculpting": "Sculpting — release to preview",
+  "freevision.hint.draft": "Perspective ready — tap to save"
+}

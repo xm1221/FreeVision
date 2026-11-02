@@ -1,0 +1,30 @@
+{
+  "key.categories.freevision": "自由视界",
+  "freevision.key.vision": "自定义视角（短按切换 / 按住调整）",
+  "freevision.key.next_slot": "切换视角槽位",
+  "freevision.key.roll_left": "调整时：向左翻滚",
+  "freevision.key.roll_right": "调整时：向右翻滚",
+  "freevision.key.reset": "调整时：机位归位到双眼",
+
+  "freevision.hud.active": "自由视界  ·  视角 %s",
+  "freevision.hud.active_hint": "短按键位可恢复原版视角",
+  "freevision.hud.sculpting": "自由视界  ·  调整中",
+  "freevision.hud.yaw": "偏航",
+  "freevision.hud.pitch": "俯仰",
+  "freevision.hud.roll": "翻滚",
+  "freevision.hud.distance": "距离",
+  "freevision.hud.height": "高度",
+  "freevision.hud.side": "侧移",
+  "freevision.hud.controls": "WASD 移动 · 空格/Shift 升降 · Ctrl 精调 · 滚轮 推拉",
+  "freevision.hud.release": "松开键位预览 · Esc 放弃本次调整",
+  "freevision.hud.draft": "视角已就绪",
+  "freevision.hud.draft_hint": "短按保存 · 按住继续调整 · Esc 放弃",
+
+  "freevision.hint.saved": "视角已保存",
+  "freevision.hint.no_preset": "还没有保存过视角——按住键位开始调整",
+  "freevision.hint.slot": "视角槽位 %s",
+  "freevision.hint.reset": "机位已归位到双眼",
+  "freevision.hint.cancelled": "已放弃本次调整",
+  "freevision.hint.sculpting": "调整中——松开键位预览",
+  "freevision.hint.draft": "视角已就绪——短按保存"
+}
