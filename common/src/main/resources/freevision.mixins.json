@@ -1,0 +1,20 @@
+{
+  "required": true,
+  "package": "cn.xm1221.freevision.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "minVersion": "0.8",
+  "client": [
+    "CameraMixin",
+    "EntityTurnMixin",
+    "GameRendererMixin",
+    "GuiMixin",
+    "KeyboardHandlerMixin",
+    "KeyboardInputMixin",
+    "MinecraftMixin",
+    "MouseHandlerMixin"
+  ],
+  "mixins": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
