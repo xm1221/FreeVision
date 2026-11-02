@@ -17,9 +17,10 @@ import java.util.List;
 /**
  * Persistent state: options plus the saved pose slots.
  *
- * <p>The file is read once at client init and rewritten on every accepted change (save, slot
- * switch, option edit). It is intentionally plain JSON so players can share a pose by pasting six
- * numbers, and so a modpack can ship a default.
+ * <p>The file is plain JSON so players can share a pose by pasting six numbers, and so a modpack can
+ * ship a default. Because it is hand-editable, everything read from it is <b>sanitised</b>: a pose at
+ * a million blocks or at NaN would otherwise drive the per-frame clip ray through millions of blocks
+ * and stall the client.
  */
 public final class VisionConfig {
     private static final Gson GSON = new GsonBuilder()
@@ -31,10 +32,10 @@ public final class VisionConfig {
 
     public VisionSettings settings = new VisionSettings();
 
-    /** Saved poses, indexed by slot. May be shorter than {@link #activeSlot} after manual edits. */
+    /** Saved poses, indexed by slot. May be shorter than {@code maxSlots} (unused slots are null-safe). */
     public List<CameraPose> presets = new ArrayList<>();
 
-    /** Index of the slot that the toggle key engages. */
+    /** Index of the slot the toggle key engages. */
     public int activeSlot;
 
     private transient Path path;
@@ -53,12 +54,14 @@ public final class VisionConfig {
     /** Loads (or creates) {@code config/freevision.json}. Safe to call more than once. */
     public static VisionConfig load() {
         VisionConfig config = new VisionConfig();
+
         try {
             config.path = Platform.getGameFolder().resolve("config").resolve("freevision.json");
 
             if (Files.notExists(config.path)) {
                 config.save();
                 instance = config;
+
                 return config;
             }
 
@@ -78,29 +81,75 @@ public final class VisionConfig {
                 parsed.path = config.path;
                 config = parsed;
             }
-        } catch (IOException | JsonSyntaxException exception) {
+        } catch (IOException | RuntimeException exception) {
             FreeVision.LOG.warn("Could not read config/freevision.json, using defaults", exception);
         }
 
+        config.sanitise();
+
         instance = config;
+
         return config;
     }
 
-    public void save() {
+    /** Validates everything that came off disk. Also never shrinks the player's saved poses. */
+    private void sanitise() {
+        if (this.settings == null) {
+            this.settings = new VisionSettings();
+        }
+
+        if (this.settings.sanitize()) {
+            FreeVision.LOG.warn("freevision.json contained out-of-range values; they were corrected");
+        }
+
+        if (this.presets == null) {
+            this.presets = new ArrayList<>();
+        }
+
+        // A hand-written file with more poses than maxSlots is the player's data, not an error:
+        // raise the limit instead of deleting their work.
+        if (this.presets.size() > this.settings.maxSlots) {
+            this.settings.maxSlots = Math.min(16, this.presets.size());
+        }
+
+        for (CameraPose pose : this.presets) {
+            if (!Float.isFinite(pose.yawOffset) || !Float.isFinite(pose.pitchOffset) || !Float.isFinite(pose.roll)
+                    || !Double.isFinite(pose.distance) || !Double.isFinite(pose.height) || !Double.isFinite(pose.side)) {
+                FreeVision.LOG.warn("Discarding a perspective with non-finite numbers");
+                pose.reset();
+            }
+
+            pose.clamp(this.settings.maxOffset);
+        }
+
+        if (this.presets.size() > 0) {
+            this.activeSlot = Math.max(0, Math.min(this.activeSlot, this.presets.size() - 1));
+        } else {
+            this.activeSlot = 0;
+        }
+    }
+
+    /** @return {@code false} when the file could not be written (disk full, read-only, ...) */
+    public boolean save() {
         if (this.path == null) {
             try {
                 this.path = Platform.getGameFolder().resolve("config").resolve("freevision.json");
             } catch (Throwable throwable) {
                 FreeVision.LOG.warn("No config directory available", throwable);
-                return;
+
+                return false;
             }
         }
 
         try {
             Files.createDirectories(this.path.getParent());
             Files.writeString(this.path, GSON.toJson(this), StandardCharsets.UTF_8);
+
+            return true;
         } catch (IOException exception) {
             FreeVision.LOG.warn("Could not write config/freevision.json", exception);
+
+            return false;
         }
     }
 
@@ -120,44 +169,20 @@ public final class VisionConfig {
 
     /** Stores a pose in the active slot, creating/growing the list as required. */
     public void storeActiveSlot(CameraPose pose) {
-        this.activeSlot = Math.max(0, Math.min(this.activeSlot, this.settings.maxSlots - 1));
+        this.activeSlot = Math.max(0, Math.min(this.activeSlot, Math.max(0, this.settings.maxSlots - 1)));
 
         while (this.presets.size() <= this.activeSlot) {
             this.presets.add(new CameraPose());
         }
 
         this.presets.set(this.activeSlot, pose.copy());
-        this.trimSlots();
     }
 
-    /** Advances to the next slot, wrapping around. Returns the new slot index. */
+    /** Advances to the next slot, wrapping around across the full configured slot count. */
     public int cycleSlot(int delta) {
-        int slots = Math.max(1, Math.min(this.settings.maxSlots, Math.max(this.presets.size(), 1)));
+        int slots = Math.max(1, this.settings.maxSlots);
         this.activeSlot = Math.floorMod(this.activeSlot + delta, slots);
+
         return this.activeSlot;
-    }
-
-    public void deleteActiveSlot() {
-        if (this.activeSlot >= 0 && this.activeSlot < this.presets.size()) {
-            this.presets.remove(this.activeSlot);
-        }
-
-        if (this.activeSlot >= this.presets.size()) {
-            this.activeSlot = Math.max(0, this.presets.size() - 1);
-        }
-
-        this.save();
-    }
-
-    private void trimSlots() {
-        int max = Math.max(1, this.settings.maxSlots);
-
-        while (this.presets.size() > max) {
-            this.presets.remove(this.presets.size() - 1);
-        }
-
-        if (this.activeSlot >= this.presets.size()) {
-            this.activeSlot = Math.max(0, this.presets.size() - 1);
-        }
     }
 }

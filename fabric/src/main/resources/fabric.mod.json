@@ -3,7 +3,7 @@
   "id": "freevision",
   "version": "${version}",
   "name": "FreeVision",
-  "description": "A fourth-person camera: hold a key to sculpt a custom perspective with WASD and the mouse, save it, then tap the key to play from that angle. Player-relative, never a free cam.",
+  "description": "A fourth-person camera: press a key to adjust a custom perspective with WASD and the mouse, press again to save it, then toggle it any time. Player-relative, never a free cam.",
   "authors": [
     "xm1221"
   ],

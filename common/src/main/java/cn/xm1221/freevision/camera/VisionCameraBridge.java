@@ -39,15 +39,11 @@ public final class VisionCameraBridge {
         float vanillaYaw = camera.getYRot();
         float vanillaPitch = camera.getXRot();
 
-        // A transition that starts "from wherever the player currently is" can only be seeded once
-        // the vanilla camera for this frame exists - that moment is right here.
-        controller.seedFromVanilla(eye, vanillaPosition, viewYaw, viewPitch, vanillaYaw, vanillaPitch);
 
         VisionState state = controller.state();
         float progress = controller.blendProgress();
-        CameraPose target = state == VisionState.LEAVING
-                ? CameraPose.fromWorld(eye, vanillaPosition, viewYaw, viewPitch, vanillaYaw, vanillaPitch)
-                : controller.targetPose();
+        CameraPose vanilla = CameraPose.fromWorld(eye, vanillaPosition, viewYaw, viewPitch, vanillaYaw, vanillaPitch, false);
+        CameraPose target = state == VisionState.LEAVING ? vanilla : controller.targetPose();
 
         if (target == null) {
             if (state == VisionState.LEAVING) {
@@ -69,7 +65,15 @@ public final class VisionCameraBridge {
             return target;
         }
 
-        CameraPose blended = CameraPose.lerp(controller.blendFrom(), target, ease(progress));
+        // Rotation modes interpret yawOffset/pitchOffset differently, so the origin is rewritten into
+        // the target's mode before interpolating. The camera looks identical at t=0 either way.
+        CameraPose from = controller.blendFrom();
+
+        if (from.absolute != target.absolute) {
+            from = from.convertMode(target.absolute, viewYaw, viewPitch);
+        }
+
+        CameraPose blended = CameraPose.lerp(from, target, ease(progress));
         controller.recordApplied(blended);
 
         return blended;

@@ -14,9 +14,11 @@ import net.minecraft.world.phys.Vec3;
  * <p>Two coordinate pieces make that work:
  *
  * <ul>
- *   <li><b>{@link #yawOffset} / {@link #pitchOffset} / {@link #roll}</b> — added on top of the
- *       player's interpolated view rotation, so the crosshair keeps pointing at what the player
- *       aims at (pitch/yaw are tracking, not fixed).</li>
+ *   <li><b>{@link #yawOffset} / {@link #pitchOffset} / {@link #roll}</b> — in the default,
+ *       player-relative mode these are added on top of the player's interpolated view rotation, so
+ *       the crosshair keeps pointing at what the player aims at. With {@link #absolute} set they
+ *       are instead the camera's <em>world</em> angles, which is the "locked view" mode: the player
+ *       turns and walks, the camera keeps looking the same direction in the world.</li>
  *   <li><b>{@link #distance} / {@link #height} / {@link #side}</b> — the eye-relative offset,
  *       measured in a frame rotated by the <i>camera's own</i> yaw. Because of that the rig orbits
  *       the player when the view turns: exactly what a third-person camera does, never a drifting
@@ -43,6 +45,13 @@ public final class CameraPose {
     public double height;
     public double side;
 
+    /**
+     * When {@code true}, {@link #yawOffset} and {@link #pitchOffset} are absolute world angles and
+     * the camera ignores the player's look direction. The camera still rides along with the player's
+     * position.
+     */
+    public boolean absolute;
+
     public CameraPose() {
     }
 
@@ -56,7 +65,9 @@ public final class CameraPose {
     }
 
     public CameraPose copy() {
-        return new CameraPose(this.yawOffset, this.pitchOffset, this.roll, this.distance, this.height, this.side);
+        CameraPose copy = new CameraPose(this.yawOffset, this.pitchOffset, this.roll, this.distance, this.height, this.side);
+        copy.absolute = this.absolute;
+        return copy;
     }
 
     /** In-place copy of another pose. */
@@ -67,6 +78,7 @@ public final class CameraPose {
         this.distance = other.distance;
         this.height = other.height;
         this.side = other.side;
+        this.absolute = other.absolute;
     }
 
     public void reset() {
@@ -76,6 +88,7 @@ public final class CameraPose {
         this.distance = 0.0D;
         this.height = 0.0D;
         this.side = 0.0D;
+        this.absolute = false;
     }
 
     /** True when the pose is visually indistinguishable from the player's own eyes. */
@@ -96,26 +109,51 @@ public final class CameraPose {
         this.distance = Mth.clamp(this.distance, -maxOffset, maxOffset);
         this.side = Mth.clamp(this.side, -maxOffset, maxOffset);
         this.height = Mth.clamp(this.height, -maxOffset, maxOffset);
-        this.pitchOffset = Mth.clamp(this.pitchOffset, -360.0F, 360.0F);
         this.roll = Mth.clamp(this.roll, -90.0F, 90.0F);
         this.yawOffset = Mth.wrapDegrees(this.yawOffset);
+
+        if (this.absolute) {
+            this.pitchOffset = Mth.clamp(this.pitchOffset, -MAX_PITCH, MAX_PITCH);
+        } else {
+            this.pitchOffset = Mth.clamp(this.pitchOffset, -360.0F, 360.0F);
+        }
+    }
+
+    /**
+     * Rewrites this pose into the requested rotation mode without moving the camera at that instant.
+     *
+     * <p>{@code viewYaw}/{@code viewPitch} are the player's current interpolated view angles, which
+     * is what makes the conversion seamless: the resulting camera looks at exactly the same place,
+     * only its tracking rule changes from then on.
+     */
+    public CameraPose convertMode(boolean targetAbsolute, float viewYaw, float viewPitch) {
+        if (this.absolute == targetAbsolute) {
+            return this.copy();
+        }
+
+        CameraPose out = this.copy();
+        out.absolute = targetAbsolute;
+
+        if (targetAbsolute) {
+            out.yawOffset = Mth.wrapDegrees(viewYaw + this.yawOffset);
+            out.pitchOffset = Mth.clamp(viewPitch + this.pitchOffset, -MAX_PITCH, MAX_PITCH);
+        } else {
+            out.yawOffset = Mth.wrapDegrees(this.yawOffset - viewYaw);
+            out.pitchOffset = this.pitchOffset - viewPitch;
+        }
+
+        return out;
     }
 
     /**
      * Re-projects a <i>world</i> camera pose back into rig space relative to a player.
      *
-     * <p>Used for two things: seeding the sculpt session from whatever vanilla camera the player
+     * <p>Used for two things: seeding the edit session from whatever vanilla camera the player
      * currently has (first person, F5 third person, bed, ...), and converting the live vanilla
      * camera into a blend target while leaving the custom view.
-     *
-     * @param eye       player's interpolated eye position
-     * @param cameraPos the camera position we want to express as a rig
-     * @param viewYaw   player's interpolated view yaw (degrees)
-     * @param viewPitch player's interpolated view pitch (degrees)
-     * @param cameraYaw the world yaw of that camera (degrees)
-     * @param cameraPitch the world pitch of that camera (degrees)
      */
-    public static CameraPose fromWorld(Vec3 eye, Vec3 cameraPos, float viewYaw, float viewPitch, float cameraYaw, float cameraPitch) {
+    public static CameraPose fromWorld(Vec3 eye, Vec3 cameraPos, float viewYaw, float viewPitch,
+            float cameraYaw, float cameraPitch, boolean absolute) {
         CameraPose pose = new CameraPose();
         double radians = Math.toRadians(cameraYaw);
         double backX = Math.sin(radians);
@@ -130,19 +168,33 @@ public final class CameraPose {
         pose.distance = dx * backX + dz * backZ;
         pose.side = dx * leftX + dz * leftZ;
         pose.height = dy;
-        pose.yawOffset = Mth.wrapDegrees(cameraYaw - viewYaw);
-        pose.pitchOffset = cameraPitch - viewPitch;
+        pose.absolute = absolute;
+
+        if (absolute) {
+            pose.yawOffset = Mth.wrapDegrees(cameraYaw);
+            pose.pitchOffset = cameraPitch;
+        } else {
+            pose.yawOffset = Mth.wrapDegrees(cameraYaw - viewYaw);
+            pose.pitchOffset = cameraPitch - viewPitch;
+        }
+
         return pose;
     }
 
     /** Camera world yaw for this rig, in degrees. */
     public float cameraYaw(Entity player, float partialTick) {
-        return player.getViewYRot(partialTick) + this.yawOffset;
+        return this.absolute
+                ? this.yawOffset
+                : player.getViewYRot(partialTick) + this.yawOffset;
     }
 
     /** Camera world pitch for this rig, clamped like vanilla look control. */
     public float cameraPitch(Entity player, float partialTick) {
-        return Mth.clamp(player.getViewXRot(partialTick) + this.pitchOffset, -MAX_PITCH, MAX_PITCH);
+        float pitch = this.absolute
+                ? this.pitchOffset
+                : player.getViewXRot(partialTick) + this.pitchOffset;
+
+        return Mth.clamp(pitch, -MAX_PITCH, MAX_PITCH);
     }
 
     /** Camera world position for this rig. */
@@ -167,9 +219,13 @@ public final class CameraPose {
     /**
      * Interpolates two rigs. Yaw uses the shortest arc so a blend from 350&deg; to 10&deg; travels
      * 20&deg; instead of wrapping 340&deg; across the screen.
+     *
+     * <p>Both poses must already be in the same rotation mode; {@link #convertMode} is the tool for
+     * that and the camera bridge does it before blending.
      */
     public static CameraPose lerp(CameraPose from, CameraPose to, float delta) {
         CameraPose out = new CameraPose();
+        out.absolute = to.absolute;
         out.yawOffset = lerpAngle(from.yawOffset, to.yawOffset, delta);
         out.pitchOffset = Mth.lerp(delta, from.pitchOffset, to.pitchOffset);
         out.roll = Mth.lerp(delta, from.roll, to.roll);
@@ -187,7 +243,8 @@ public final class CameraPose {
 
     @Override
     public String toString() {
-        return String.format("CameraPose[yaw=%.1f pitch=%.1f roll=%.1f dist=%.2f h=%.2f side=%.2f]",
+        return String.format("CameraPose[%s yaw=%.1f pitch=%.1f roll=%.1f dist=%.2f h=%.2f side=%.2f]",
+                this.absolute ? "absolute" : "relative",
                 this.yawOffset, this.pitchOffset, this.roll, this.distance, this.height, this.side);
     }
 }

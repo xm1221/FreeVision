@@ -2,6 +2,7 @@ package cn.xm1221.freevision.mixin;
 
 import cn.xm1221.freevision.camera.CameraPose;
 import cn.xm1221.freevision.camera.VisionCameraBridge;
+import cn.xm1221.freevision.camera.VisionController;
 import net.minecraft.client.Camera;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
@@ -30,9 +31,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *   <li>{@code Camera#setRotation} rebuilds the look/up/left basis from yaw and pitch. Roll is not
  *       part of that call, so it is applied afterwards by rotating the quaternion around the local
  *       Z axis (the view axis) and re-deriving the basis.</li>
- *   <li>{@code detached = true} is what makes {@code LevelRenderer} draw the local player even
- *       though the camera entity is still the player. Without it the player would be invisible
- *       from their own custom perspective.</li>
+ *   <li>{@code detached} is what makes {@code LevelRenderer} draw the local player even though the
+ *       camera entity is still the player. It is only set when the rig actually left the head, so a
+ *       pose sitting on the eyes behaves like a normal first-person view instead of showing the
+ *       inside of the player's head. The same flag is published to the controller so the hand model
+ *       and the player model are never both hidden.</li>
  * </ul>
  */
 @Mixin(Camera.class)
@@ -77,6 +80,8 @@ public abstract class CameraMixin {
         CameraPose pose = VisionCameraBridge.computePose(entity, (Camera) (Object) this, partialTick, eye);
 
         if (pose == null) {
+            VisionController.get().setRenderedDetached(false);
+
             return;
         }
 
@@ -89,10 +94,9 @@ public abstract class CameraMixin {
         Vec3 position = VisionCameraBridge.computePosition(entity, pose, partialTick, eye);
         this.setPosition(position);
 
-        // Let LevelRenderer know the camera left the head, so the player model is drawn. When the
-        // rig sits essentially on the eyes it is left false, which reads as a normal first-person
-        // view instead of the inside of the player's head.
-        this.detached = position.distanceToSqr(eye) > 0.02D;
+        boolean awayFromHead = position.distanceToSqr(eye) > 0.02D;
+        this.detached = awayFromHead;
+        VisionController.get().setRenderedDetached(awayFromHead);
     }
 
     @Unique

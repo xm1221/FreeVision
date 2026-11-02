@@ -3,30 +3,22 @@ package cn.xm1221.freevision.config;
 /**
  * User tunables, persisted verbatim to {@code config/freevision.json}.
  *
- * <p>Everything here is hot-reloadable at runtime (the config screen is the JSON file itself);
- * the controller reads the live values each tick instead of caching them.
+ * <p>Values are read at startup; editing the file while the game is running does not take effect
+ * until the next launch. Every mutation the mod itself makes (saving, slot cycling, lock toggling)
+ * goes through {@link VisionConfig#save()}, so the file is always current on disk.
  */
 public final class VisionSettings {
-    /** How long the key must be held before it counts as "hold to sculpt" instead of a tap. */
-    public int holdThresholdMs = 220;
-
-    /** Camera translation speed while sculpting, in blocks per client tick (20/s). */
-    public double sculptSpeed = 0.22;
+    /** Camera translation speed while adjusting, in blocks per client tick (20/s). */
+    public double sculptSpeed = 0.22D;
 
     /** Maximum distance the rig may travel away from the player's eye, in blocks. */
-    public double maxOffset = 16.0;
+    public double maxOffset = 16.0D;
 
-    /** Milliseconds for the in/out camera blend. */
+    /** Milliseconds for the in/out camera blend. Set to 0 for an instant cut. */
     public int transitionMs = 220;
 
     /** Smoothly fly between the vanilla camera and the custom one. */
     public boolean smoothTransitions = true;
-
-    /**
-     * After saving a draft, immediately switch into the saved view.
-     * Default {@code false}: saving returns to the vanilla view, and the next short press enters it.
-     */
-    public boolean enterOnSave = false;
 
     /** Pull the custom camera out of walls/solids like vanilla third person does. */
     public boolean avoidClipping = true;
@@ -37,15 +29,39 @@ public final class VisionSettings {
     /** Suppress view bobbing while the custom perspective is applied. */
     public boolean disableViewBobbing = true;
 
-    /** Draw the status / sculpt overlay. */
+    /** Master switch for every overlay. */
     public boolean showHud = true;
+
+    /** The adjusting panel (pose numbers and key hints). */
+    public boolean showPanel = true;
+
+    /** Short status toasts ("perspective saved", "view lock on", ...). */
+    public boolean showToasts = true;
 
     /** Play a soft click when a pose is saved or the view is toggled. */
     public boolean playSounds = true;
 
-    /** Hold the sprint key (Ctrl) while sculpting for fine 1/5 speed movement. */
+    /** Hold the sprint key while adjusting for fine 1/5 speed movement. */
     public boolean precisionModifier = true;
 
-    /** How many pose slots the player may keep (saved poses beyond the last are dropped). */
+    /** How many pose slots the player may keep. */
     public int maxSlots = 3;
+
+    /**
+     * Falls every field back into a sane range. Called on load so a hand-edited or corrupted file
+     * can never put the camera at infinity, at a million blocks away, or at NaN - any of which would
+     * make the per-frame clip ray traversal stall the client.
+     *
+     * @return {@code true} when something had to be corrected
+     */
+    public boolean sanitize() {
+        boolean changed = !Double.isFinite(this.sculptSpeed) || !Double.isFinite(this.maxOffset);
+
+        this.sculptSpeed = Double.isFinite(this.sculptSpeed) ? Math.max(0.001D, Math.min(2.0D, this.sculptSpeed)) : 0.22D;
+        this.maxOffset = Double.isFinite(this.maxOffset) ? Math.max(1.0D, Math.min(64.0D, this.maxOffset)) : 16.0D;
+        this.transitionMs = Math.max(0, Math.min(2000, this.transitionMs));
+        this.maxSlots = Math.max(1, Math.min(16, this.maxSlots));
+
+        return changed;
+    }
 }

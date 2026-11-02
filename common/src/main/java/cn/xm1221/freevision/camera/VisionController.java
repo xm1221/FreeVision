@@ -3,26 +3,43 @@ package cn.xm1221.freevision.camera;
 import cn.xm1221.freevision.client.VisionKeybinds;
 import cn.xm1221.freevision.config.VisionConfig;
 import cn.xm1221.freevision.config.VisionSettings;
+import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.client.Camera;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.Mth;
-import net.minecraft.world.phys.Vec3;
 
 /**
  * The single owner of the custom-perspective state machine.
  *
- * <p>Everything else in the mod is a thin adapter around this class: mixins forward raw input
- * here, the camera mixin asks it for the pose to render, the HUD asks it what to draw.
+ * <p>Everything else in the mod is a thin adapter around this class: mixins forward raw input here,
+ * the camera mixin asks it for the pose to render, the HUD asks it what to draw.
+ *
+ * <p>Interaction model: adjusting is an explicit mode. Press the edit key to enter it, press it
+ * again to save, the discard key to throw the edits away. Nothing requires holding a key down to
+ * change mode, and Esc is never taken away from the player - it still opens the pause menu.
  *
  * <p>Threading: only ever touched from the client thread (input mixins and the render loop).
  */
 public final class VisionController {
     private static final VisionController INSTANCE = new VisionController();
 
-    /** Grace window for the "did the key press start this tick" bookkeeping. */
+    /** Vanilla applies this factor to raw mouse deltas before storing them as rotation. */
     private static final float VANILLA_TURN_SCALE = 0.15F;
+
+    /** Degrees per tick when turning with the arrow keys. */
+    private static final float LOOK_STEP = 1.6F;
+
+    /** Degrees per tick when rolling. */
+    private static final float ROLL_STEP = 1.25F;
+
+    private static final long HINT_SHORT_MS = 3500L;
+    private static final long HINT_LONG_MS = 6000L;
+
+    /** Debounce for the mode-changing key, in case the OS repeats or the player double-taps. */
+    private static final long EDIT_DEBOUNCE_MS = 200L;
 
     public static VisionController get() {
         return INSTANCE;
@@ -31,33 +48,27 @@ public final class VisionController {
     private VisionState state = VisionState.VANILLA;
     private VisionState stateBeforeSculpt = VisionState.VANILLA;
 
-    /** Live pose being edited in {@link VisionState#SCULPTING} / {@link VisionState#DRAFT}. */
+    /** Live pose being edited in {@link VisionState#SCULPTING}. */
     private final CameraPose sculptPose = new CameraPose();
 
     /** Pose the current blend started from. */
     private final CameraPose blendFrom = new CameraPose();
 
-    /** Last pose actually handed to the camera, so re-grabbing mid-transition is seamless. */
+    /** Last pose actually handed to the camera, so re-entering edit mode is seamless. */
     private final CameraPose lastApplied = new CameraPose();
 
     private boolean hasLastApplied;
 
+    /** Whether the camera currently renders away from the head (drives the hand model). */
+    private boolean renderedDetached;
+
     private long blendStartNs;
     private long blendDurationNs;
-
-    private boolean keyWasDown;
-    private long keyPressStartMs;
-    private boolean holdHandled;
-
-    /** Set when the blend origin still has to be captured from the vanilla camera. */
-    private boolean pendingVanillaSeed;
-
-    /** Whether that capture should also become the starting sculpt pose. */
-    private boolean seedSculptFromVanilla;
+    private long lastEditClickMs;
 
     private String hintKey;
+    private Object[] hintArgs = new Object[0];
     private long hintUntilMs;
-    private int hintSlot;
 
     private VisionController() {
     }
@@ -70,10 +81,6 @@ public final class VisionController {
 
     public boolean isOverriding() {
         return this.state.isOverriding();
-    }
-
-    public boolean isApplied() {
-        return this.state.isApplied();
     }
 
     public boolean isSculpting() {
@@ -92,12 +99,20 @@ public final class VisionController {
         return this.blendFrom;
     }
 
+    public boolean isRenderedDetached() {
+        return this.renderedDetached;
+    }
+
+    public void setRenderedDetached(boolean detached) {
+        this.renderedDetached = detached;
+    }
+
     /** The pose to render, or {@code null} when vanilla should own the camera. */
     public CameraPose targetPose() {
         VisionConfig config = VisionConfig.get();
 
         return switch (this.state) {
-            case SCULPTING, DRAFT -> this.sculptPose;
+            case SCULPTING -> this.sculptPose;
             case ACTIVE -> config.activePreset();
             default -> null;
         };
@@ -130,38 +145,6 @@ public final class VisionController {
         this.hasLastApplied = true;
     }
 
-    public boolean pendingVanillaSeed() {
-        return this.pendingVanillaSeed;
-    }
-
-    /**
-     * Called by the camera bridge with the vanilla pose it just computed, when a transition needs
-     * to start exactly where the current (vanilla) camera is.
-     *
-     * @return {@code true} when the sculpt pose was seeded as well
-     */
-    public boolean seedFromVanilla(Vec3 eye, Vec3 cameraPos, float viewYaw, float viewPitch, float cameraYaw, float cameraPitch) {
-        if (!this.pendingVanillaSeed) {
-            return false;
-        }
-
-        CameraPose vanilla = CameraPose.fromWorld(eye, cameraPos, viewYaw, viewPitch, cameraYaw, cameraPitch);
-        this.blendFrom.set(vanilla);
-        this.pendingVanillaSeed = false;
-
-        if (this.seedSculptFromVanilla) {
-            this.sculptPose.set(vanilla);
-            this.sculptPose.clamp(VisionConfig.get().settings.maxOffset);
-            this.seedSculptFromVanilla = false;
-
-            return true;
-        }
-
-        this.blendStartNs = System.nanoTime();
-
-        return false;
-    }
-
     // ------------------------------------------------------------------- tick
 
     /** Runs at the head of {@code Minecraft.tick}, before the player's own tick. */
@@ -172,210 +155,176 @@ public final class VisionController {
             return;
         }
 
+        // A screen owns the keyboard and the mouse. Never change state behind it, and never steal a
+        // key press the player meant for a GUI.
+        if (minecraft.screen != null) {
+            tickHint();
+
+            return;
+        }
+
         VisionConfig config = VisionConfig.get();
-        VisionSettings settings = config.settings;
+        handleKeys(minecraft, config);
 
-        // A screen (inventory, chat, pause) steals all input; park the session in DRAFT so nothing
-        // the player sculpted is lost.
-        if (minecraft.screen != null && this.state.isSculpting()) {
-            enterDraft();
+        if (this.state.isSculpting()) {
+            handleMovement(minecraft, config.settings);
+            handleLook(minecraft, config.settings);
+            handleRoll(minecraft, config.settings);
+            handleDolly(minecraft, config.settings);
+            handleReset();
         }
 
-        handleSlotKeys(config);
-
-        if (this.state == VisionState.VANILLA && this.hintUntilMs < System.currentTimeMillis()) {
-            this.hintKey = null;
-        }
-
-        handleMainKey(minecraft, config, settings);
-
-        if (this.state.isSculpting() && minecraft.screen == null) {
-            handleSculptMovement(minecraft, settings);
-            handleRoll(minecraft, settings);
-
-            while (VisionKeybinds.reset != null && VisionKeybinds.reset.consumeClick()) {
-                this.sculptPose.reset();
-                showHint("freevision.hint.reset", 900);
-            }
-        }
+        tickHint();
     }
 
-    private void handleSlotKeys(VisionConfig config) {
-        if (VisionKeybinds.nextSlot == null || !VisionKeybinds.nextSlot.consumeClick()) {
-            return;
-        }
+    private void handleKeys(Minecraft minecraft, VisionConfig config) {
+        if (consume(VisionKeybinds.edit)) {
+            long now = System.currentTimeMillis();
 
-        CameraPose previous = config.activePreset();
-        int slot = config.cycleSlot(1);
-        config.save();
+            if (now - this.lastEditClickMs >= EDIT_DEBOUNCE_MS) {
+                this.lastEditClickMs = now;
 
-        if (this.state == VisionState.ACTIVE) {
-            // Blend from the pose that is on screen right now, not from the newly selected one.
-            this.blendFrom.set(previous != null ? previous : this.sculptPose);
-            startTransition(config);
-        }
-
-        this.hintSlot = slot + 1;
-        showHint("freevision.hint.slot", 1200);
-    }
-
-    private void handleMainKey(Minecraft minecraft, VisionConfig config, VisionSettings settings) {
-        KeyMapping key = VisionKeybinds.vision;
-
-        if (key == null) {
-            return;
-        }
-
-        boolean down = key.isDown();
-        long now = System.currentTimeMillis();
-
-        if (down) {
-            if (!this.keyWasDown) {
-                this.keyPressStartMs = now;
-                this.holdHandled = false;
-            }
-
-            if (!this.holdHandled && now - this.keyPressStartMs >= Math.max(60, settings.holdThresholdMs)) {
-                this.holdHandled = true;
-                beginSculpt();
-            }
-        } else if (this.keyWasDown) {
-            if (this.state.isSculpting()) {
-                enterDraft();
-            } else if (!this.holdHandled) {
-                onTap(config);
-            }
-        }
-
-        this.keyWasDown = down;
-    }
-
-    private void onTap(VisionConfig config) {
-        switch (this.state) {
-            case VANILLA -> {
-                if (config.hasPreset()) {
-                    activate();
+                if (this.state.isSculpting()) {
+                    finishSculpt(config);
                 } else {
-                    showHint("freevision.hint.no_preset", 2200);
+                    beginSculpt(minecraft, config);
                 }
             }
-            case ACTIVE -> deactivate();
-            case DRAFT -> commit(config);
-            default -> {
+        }
+
+        if (consume(VisionKeybinds.vision)) {
+            switch (this.state) {
+                case VANILLA -> activate(minecraft, config);
+                case ACTIVE -> deactivate(config);
+                case SCULPTING -> finishSculpt(config);
+                // Leaving is only ~220ms long; treat the press as "turn it back on".
+                case LEAVING -> activate(minecraft, config);
             }
+        }
+
+        if (consume(VisionKeybinds.lock)) {
+            toggleLock(minecraft, config);
+        }
+
+        if (consume(VisionKeybinds.nextSlot)) {
+            cycleSlot(config);
+        }
+
+        if (consume(VisionKeybinds.discard)) {
+            cancel();
         }
     }
 
-    private void beginSculpt() {
-        if (this.state == VisionState.DRAFT) {
-            this.state = VisionState.SCULPTING;
-            return;
+    /** One press = one action, no matter how many clicks queued up this tick. */
+    private static boolean consume(KeyMapping mapping) {
+        if (mapping == null) {
+            return false;
         }
 
-        this.stateBeforeSculpt = this.state;
+        boolean clicked = mapping.consumeClick();
+
+        while (mapping.consumeClick()) {
+            // drop repeats / double taps within the same tick
+        }
+
+        return clicked;
+    }
+
+    /**
+     * Reads the pose the camera is showing right now. Used to start an edit session or a blend from
+     * exactly what the player sees, including plain vanilla first/third person and bed cameras.
+     */
+    private CameraPose captureCamera(Minecraft minecraft) {
+        if (minecraft.player == null) {
+            return new CameraPose();
+        }
+
+        Camera camera = minecraft.gameRenderer.getMainCamera();
+
+        if (camera == null || !camera.isInitialized()) {
+            return new CameraPose();
+        }
+
+        float partialTick = 1.0F;
+
+        return CameraPose.fromWorld(
+                minecraft.player.getEyePosition(partialTick),
+                camera.getPosition(),
+                minecraft.player.getViewYRot(partialTick),
+                minecraft.player.getViewXRot(partialTick),
+                camera.getYRot(),
+                camera.getXRot(),
+                false);
+    }
+
+    private void beginSculpt(Minecraft minecraft, VisionConfig config) {
         this.blendDurationNs = 0L;
-
-        if (this.state == VisionState.LEAVING && this.hasLastApplied) {
-            // Grabbed mid-exit: keep the exact frame the player is looking at instead of snapping
-            // back to the vanilla camera first.
-            this.stateBeforeSculpt = VisionState.VANILLA;
-            this.sculptPose.set(this.lastApplied);
-            this.blendFrom.set(this.sculptPose);
-            this.state = VisionState.SCULPTING;
-            showHint("freevision.hint.sculpting", 0);
-
-            return;
-        }
 
         if (this.state == VisionState.ACTIVE) {
-            CameraPose active = VisionConfig.get().activePreset();
-
-            if (active != null) {
-                this.sculptPose.set(active);
-                this.sculptPose.clamp(VisionConfig.get().settings.maxOffset);
-            } else {
-                this.sculptPose.reset();
-            }
-
-            this.state = VisionState.SCULPTING;
-            this.blendFrom.set(this.sculptPose);
+            this.stateBeforeSculpt = VisionState.ACTIVE;
+            CameraPose active = config.activePreset();
+            this.sculptPose.set(active != null ? active : captureCamera(minecraft));
+        } else if (this.state == VisionState.LEAVING && this.hasLastApplied) {
+            // Re-entered mid-exit: keep the exact frame the player is looking at.
+            this.stateBeforeSculpt = VisionState.VANILLA;
+            this.sculptPose.set(this.lastApplied);
         } else {
-            // Seed both the blend origin and the starting pose from the live vanilla camera, so the
-            // camera does not jump when the key is held.
-            this.state = VisionState.SCULPTING;
-            this.pendingVanillaSeed = true;
-            this.seedSculptFromVanilla = true;
+            this.stateBeforeSculpt = VisionState.VANILLA;
+            this.sculptPose.set(captureCamera(minecraft));
         }
 
-        showHint("freevision.hint.sculpting", 0);
-    }
-
-    private void enterDraft() {
-        if (this.state != VisionState.SCULPTING) {
-            return;
-        }
-
-        this.state = VisionState.DRAFT;
-        this.blendDurationNs = 0L;
+        this.sculptPose.clamp(config.settings.maxOffset);
         this.blendFrom.set(this.sculptPose);
-        showHint("freevision.hint.draft", 0);
+        this.state = VisionState.SCULPTING;
     }
 
-    private void commit(VisionConfig config) {
+    private void finishSculpt(VisionConfig config) {
         this.sculptPose.clamp(config.settings.maxOffset);
         config.storeActiveSlot(this.sculptPose);
-        config.save();
 
-        this.blendFrom.set(this.sculptPose);
-        click(config, 1.5F);
+        if (!config.save()) {
+            // Stay in edit mode so nothing is lost and the player can retry.
+            showHint("freevision.hint.save_failed", HINT_LONG_MS);
 
-        if (config.settings.enterOnSave) {
-            this.state = VisionState.ACTIVE;
-            this.stateBeforeSculpt = VisionState.ACTIVE;
-            this.blendDurationNs = 0L;
-            showHint("freevision.hint.saved", 1400);
-        } else {
-            // Faithful to the "save it, then short-press to enter it" flow: hand the camera back.
-            this.state = VisionState.LEAVING;
-            this.stateBeforeSculpt = VisionState.VANILLA;
-            startTransition(config);
-            showHint("freevision.hint.saved_enter", 2200);
-        }
-    }
-
-    private void activate() {
-        VisionConfig config = VisionConfig.get();
-
-        if (!config.hasPreset()) {
-            showHint("freevision.hint.no_preset", 1800);
             return;
         }
 
         this.state = VisionState.ACTIVE;
         this.stateBeforeSculpt = VisionState.ACTIVE;
-        this.pendingVanillaSeed = true;
-        this.seedSculptFromVanilla = false;
-        startTransition(config);
-        click(config, 1.2F);
+        this.blendFrom.set(this.sculptPose);
+        this.blendDurationNs = 0L;
+
+        click(config, 1.5F);
+        showHint("freevision.hint.saved", HINT_SHORT_MS, visionKeyLabel());
     }
 
-    private void deactivate() {
-        VisionConfig config = VisionConfig.get();
-        CameraPose active = config.activePreset();
+    private void activate(Minecraft minecraft, VisionConfig config) {
+        if (!config.hasPreset()) {
+            showHint("freevision.hint.no_preset", HINT_LONG_MS, editKeyLabel());
 
-        this.blendFrom.set(active != null ? active : this.sculptPose);
+            return;
+        }
+
+        this.blendFrom.set(captureCamera(minecraft));
+        this.state = VisionState.ACTIVE;
+        this.stateBeforeSculpt = VisionState.ACTIVE;
+        startTransition(config);
+        click(config, 1.2F);
+        showHint("freevision.hint.active", HINT_SHORT_MS, visionKeyLabel());
+    }
+
+    private void deactivate(VisionConfig config) {
+        CameraPose origin = this.hasLastApplied ? this.lastApplied : config.activePreset();
+        this.blendFrom.set(origin != null ? origin : new CameraPose());
         this.state = VisionState.LEAVING;
         startTransition(config);
         click(config, 0.9F);
+        showHint("freevision.hint.inactive", HINT_SHORT_MS, visionKeyLabel());
     }
 
-    /** Esc: throw the sculpted pose away. */
+    /** Discard key: throw the edits away and go back to where the player was. */
     public boolean cancel() {
-        if (this.state == VisionState.SCULPTING) {
-            enterDraft();
-        }
-
-        if (this.state != VisionState.DRAFT) {
+        if (!this.state.isSculpting()) {
             return false;
         }
 
@@ -386,13 +335,91 @@ public final class VisionController {
             this.state = VisionState.ACTIVE;
         } else {
             this.state = VisionState.LEAVING;
-            this.stateBeforeSculpt = VisionState.VANILLA;
         }
 
         startTransition(config);
-        showHint("freevision.hint.cancelled", 1200);
+        showHint("freevision.hint.cancelled", HINT_SHORT_MS);
 
         return true;
+    }
+
+    /**
+     * Flips between "the camera tracks the player's look" and "the camera holds a world direction".
+     * The conversion happens at the current frame, so the picture does not jump.
+     */
+    private void toggleLock(Minecraft minecraft, VisionConfig config) {
+        if (minecraft.player == null) {
+            return;
+        }
+
+        float viewYaw = minecraft.player.getViewYRot(1.0F);
+        float viewPitch = minecraft.player.getViewXRot(1.0F);
+
+        if (this.state.isSculpting()) {
+            this.sculptPose.set(this.sculptPose.convertMode(!this.sculptPose.absolute, viewYaw, viewPitch));
+            this.sculptPose.clamp(config.settings.maxOffset);
+            showHint(this.sculptPose.absolute ? "freevision.hint.lock_on" : "freevision.hint.lock_off", HINT_SHORT_MS);
+
+            return;
+        }
+
+        if (this.state == VisionState.ACTIVE) {
+            CameraPose active = config.activePreset();
+
+            if (active == null) {
+                return;
+            }
+
+            CameraPose converted = active.convertMode(!active.absolute, viewYaw, viewPitch);
+            config.storeActiveSlot(converted);
+
+            if (!config.save()) {
+                showHint("freevision.hint.save_failed", HINT_LONG_MS);
+
+                return;
+            }
+
+            this.blendFrom.set(active);
+            startTransition(config);
+            showHint(converted.absolute ? "freevision.hint.lock_on" : "freevision.hint.lock_off", HINT_SHORT_MS);
+
+            return;
+        }
+
+        showHint("freevision.hint.lock_needs_view", HINT_LONG_MS, editKeyLabel());
+    }
+
+    private void cycleSlot(VisionConfig config) {
+        CameraPose previous = this.hasLastApplied ? this.lastApplied : config.activePreset();
+        int slot = config.cycleSlot(1);
+        config.save();
+
+        if (this.state == VisionState.ACTIVE) {
+            if (!config.hasPreset()) {
+                // The slot we landed on is empty: there is nothing to show, so fall back gracefully.
+                this.blendFrom.set(previous != null ? previous : this.sculptPose);
+                this.state = VisionState.LEAVING;
+                startTransition(config);
+                showHint("freevision.hint.slot_empty", HINT_LONG_MS, slot + 1);
+
+                return;
+            }
+
+            this.blendFrom.set(previous != null ? previous : this.sculptPose);
+            startTransition(config);
+        } else if (this.state.isSculpting()) {
+            // Keep the editor in sync with the slot it would now save into.
+            CameraPose loaded = config.activePreset();
+
+            if (loaded != null) {
+                this.sculptPose.set(loaded);
+                this.sculptPose.clamp(config.settings.maxOffset);
+                this.blendFrom.set(this.sculptPose);
+                this.blendDurationNs = 0L;
+            }
+        }
+
+        showHint("freevision.hint.slot", HINT_SHORT_MS, slot + 1, config.settings.maxSlots);
     }
 
     private void startTransition(VisionConfig config) {
@@ -410,9 +437,9 @@ public final class VisionController {
     // ------------------------------------------------------------------ input
 
     /**
-     * Mouse look while sculpting. The values handed in are the exact deltas vanilla would have
-     * applied to the player's rotation, so sensitivity, invert-Y and smooth-camera all keep
-     * working as the player expects.
+     * Mouse look while adjusting. The values handed in are the exact deltas vanilla would have
+     * applied to the player's rotation, so sensitivity, invert-Y and smooth-camera all keep working
+     * as the player expects.
      *
      * @return {@code true} when the turn was consumed by the camera
      */
@@ -427,25 +454,24 @@ public final class VisionController {
             return false;
         }
 
-        this.sculptPose.yawOffset = Mth.wrapDegrees(this.sculptPose.yawOffset + (float) (yawDelta * VANILLA_TURN_SCALE));
-        this.sculptPose.pitchOffset += (float) (pitchDelta * VANILLA_TURN_SCALE);
-
-        float viewPitch = minecraft.player.getXRot();
-        this.sculptPose.pitchOffset = Mth.clamp(this.sculptPose.pitchOffset,
-                -CameraPose.MAX_PITCH - viewPitch,
-                CameraPose.MAX_PITCH - viewPitch);
-        this.sculptPose.clamp(VisionConfig.get().settings.maxOffset);
+        applyTurn(minecraft, (float) (yawDelta * VANILLA_TURN_SCALE), (float) (pitchDelta * VANILLA_TURN_SCALE));
 
         return true;
     }
 
     /**
-     * Mouse wheel while sculpting: dolly the rig along its own view axis.
+     * Mouse wheel while adjusting: dolly the rig along its own view axis.
      *
      * @return {@code true} when the scroll was consumed
      */
     public boolean handleScroll(double scrollDelta) {
         if (!this.state.isSculpting() || scrollDelta == 0.0D) {
+            return false;
+        }
+
+        Minecraft minecraft = Minecraft.getInstance();
+
+        if (minecraft.screen != null || minecraft.mouseHandler == null || !minecraft.mouseHandler.isMouseGrabbed()) {
             return false;
         }
 
@@ -455,14 +481,94 @@ public final class VisionController {
         return true;
     }
 
-    private void handleSculptMovement(Minecraft minecraft, VisionSettings settings) {
+    private void applyTurn(Minecraft minecraft, float yaw, float pitch) {
+        this.sculptPose.yawOffset = Mth.wrapDegrees(this.sculptPose.yawOffset + yaw);
+
+        if (this.sculptPose.absolute) {
+            this.sculptPose.pitchOffset = Mth.clamp(this.sculptPose.pitchOffset + pitch,
+                    -CameraPose.MAX_PITCH, CameraPose.MAX_PITCH);
+        } else {
+            float viewPitch = minecraft.player == null ? 0.0F : minecraft.player.getXRot();
+            this.sculptPose.pitchOffset = Mth.clamp(this.sculptPose.pitchOffset + pitch,
+                    -CameraPose.MAX_PITCH - viewPitch,
+                    CameraPose.MAX_PITCH - viewPitch);
+        }
+
+        this.sculptPose.clamp(VisionConfig.get().settings.maxOffset);
+    }
+
+    /** Keyboard-only camera turning, so a mouse (or a steady hand) is not required to use the mod. */
+    private void handleLook(Minecraft minecraft, VisionSettings settings) {
+        float step = LOOK_STEP;
+
+        if (settings.precisionModifier && physicallyDown(minecraft, minecraft.options.keySprint)) {
+            step *= 0.25F;
+        }
+
+        float yaw = 0.0F;
+        float pitch = 0.0F;
+
+        if (physicallyDown(minecraft, VisionKeybinds.lookLeft)) {
+            yaw -= step;
+        }
+
+        if (physicallyDown(minecraft, VisionKeybinds.lookRight)) {
+            yaw += step;
+        }
+
+        if (physicallyDown(minecraft, VisionKeybinds.lookUp)) {
+            pitch -= step;
+        }
+
+        if (physicallyDown(minecraft, VisionKeybinds.lookDown)) {
+            pitch += step;
+        }
+
+        if (yaw == 0.0F && pitch == 0.0F) {
+            return;
+        }
+
+        applyTurn(minecraft, yaw, pitch);
+    }
+
+    private void handleDolly(Minecraft minecraft, VisionSettings settings) {
+        double step = Math.max(0.05D, settings.sculptSpeed);
+        boolean moved = false;
+
+        while (VisionKeybinds.dollyIn != null && VisionKeybinds.dollyIn.consumeClick()) {
+            this.sculptPose.distance -= step;
+            moved = true;
+        }
+
+        while (VisionKeybinds.dollyOut != null && VisionKeybinds.dollyOut.consumeClick()) {
+            this.sculptPose.distance += step;
+            moved = true;
+        }
+
+        if (moved) {
+            this.sculptPose.clamp(settings.maxOffset);
+        }
+    }
+
+    private void handleReset() {
+        if (VisionKeybinds.reset == null) {
+            return;
+        }
+
+        while (VisionKeybinds.reset.consumeClick()) {
+            this.sculptPose.reset();
+            showHint("freevision.hint.reset", HINT_SHORT_MS);
+        }
+    }
+
+    private void handleMovement(Minecraft minecraft, VisionSettings settings) {
         double step = settings.sculptSpeed;
 
         if (step <= 0.0D) {
             return;
         }
 
-        if (settings.precisionModifier && minecraft.options.keySprint.isDown()) {
+        if (settings.precisionModifier && physicallyDown(minecraft, minecraft.options.keySprint)) {
             step *= 0.2D;
         }
 
@@ -470,27 +576,27 @@ public final class VisionController {
         double strafe = 0.0D;
         double vertical = 0.0D;
 
-        if (minecraft.options.keyUp.isDown()) {
+        if (physicallyDown(minecraft, minecraft.options.keyUp)) {
             forward += 1.0D;
         }
 
-        if (minecraft.options.keyDown.isDown()) {
+        if (physicallyDown(minecraft, minecraft.options.keyDown)) {
             forward -= 1.0D;
         }
 
-        if (minecraft.options.keyLeft.isDown()) {
+        if (physicallyDown(minecraft, minecraft.options.keyLeft)) {
             strafe += 1.0D;
         }
 
-        if (minecraft.options.keyRight.isDown()) {
+        if (physicallyDown(minecraft, minecraft.options.keyRight)) {
             strafe -= 1.0D;
         }
 
-        if (minecraft.options.keyJump.isDown()) {
+        if (physicallyDown(minecraft, minecraft.options.keyJump)) {
             vertical += 1.0D;
         }
 
-        if (minecraft.options.keyShift.isDown()) {
+        if (physicallyDown(minecraft, minecraft.options.keyShift)) {
             vertical -= 1.0D;
         }
 
@@ -507,14 +613,14 @@ public final class VisionController {
     }
 
     private void handleRoll(Minecraft minecraft, VisionSettings settings) {
-        double rollStep = 1.25D;
+        double rollStep = ROLL_STEP;
 
-        if (settings.precisionModifier && minecraft.options.keySprint.isDown()) {
+        if (settings.precisionModifier && physicallyDown(minecraft, minecraft.options.keySprint)) {
             rollStep *= 0.25D;
         }
 
-        boolean left = VisionKeybinds.rollLeft != null && VisionKeybinds.rollLeft.isDown();
-        boolean right = VisionKeybinds.rollRight != null && VisionKeybinds.rollRight.isDown();
+        boolean left = physicallyDown(minecraft, VisionKeybinds.rollLeft);
+        boolean right = physicallyDown(minecraft, VisionKeybinds.rollRight);
 
         if (!left && !right) {
             return;
@@ -524,41 +630,75 @@ public final class VisionController {
         this.sculptPose.clamp(settings.maxOffset);
     }
 
+    /**
+     * Reads the physical key state instead of {@link KeyMapping#isDown()}.
+     *
+     * <p>Shift and sprint are {@code ToggleKeyMapping} instances when the player enables
+     * "toggle crouch/sprint": their {@code isDown()} stays true after a single tap, which would make
+     * the rig sink forever and the precision modifier stick. Polling the window keeps the behaviour
+     * identical to what the finger is doing.
+     */
+    private static boolean physicallyDown(Minecraft minecraft, KeyMapping mapping) {
+        if (mapping == null) {
+            return false;
+        }
+
+        InputConstants.Key key = InputConstants.getKey(mapping.saveString());
+
+        if (key.getType() == InputConstants.Type.KEYSYM && minecraft.getWindow() != null) {
+            return InputConstants.isKeyDown(minecraft.getWindow().getWindow(), key.getValue());
+        }
+
+        return mapping.isDown();
+    }
+
     // ------------------------------------------------------------------ misc
 
     public void reset() {
         this.state = VisionState.VANILLA;
         this.stateBeforeSculpt = VisionState.VANILLA;
-        this.pendingVanillaSeed = false;
-        this.seedSculptFromVanilla = false;
         this.hasLastApplied = false;
-        this.keyWasDown = false;
-        this.holdHandled = false;
+        this.renderedDetached = false;
         this.blendDurationNs = 0L;
         this.hintKey = null;
+        this.hintArgs = new Object[0];
+        this.sculptPose.reset();
+        this.blendFrom.reset();
+        this.lastApplied.reset();
     }
 
-    public void showHint(String translationKey, long millis) {
+    public void showHint(String translationKey, long millis, Object... args) {
         this.hintKey = translationKey;
-        this.hintUntilMs = millis <= 0L ? Long.MAX_VALUE : System.currentTimeMillis() + millis;
+        this.hintArgs = args.clone();
+        this.hintUntilMs = System.currentTimeMillis() + (millis <= 0L ? HINT_SHORT_MS : millis);
     }
 
     public String hintKey() {
-        if (this.hintKey == null) {
-            return null;
-        }
-
-        if (this.hintUntilMs < System.currentTimeMillis()) {
-            this.hintKey = null;
-
-            return null;
-        }
-
         return this.hintKey;
     }
 
-    public int hintSlot() {
-        return this.hintSlot;
+    public Object[] hintArgs() {
+        return this.hintArgs;
+    }
+
+    private void tickHint() {
+        if (this.hintKey != null && this.hintUntilMs < System.currentTimeMillis()) {
+            this.hintKey = null;
+            this.hintArgs = new Object[0];
+        }
+    }
+
+    private String editKeyLabel() {
+        return label(VisionKeybinds.edit);
+    }
+
+    private String visionKeyLabel() {
+        return label(VisionKeybinds.vision);
+    }
+
+    /** The translated name of whatever key the player has bound to {@code mapping}. */
+    public static String label(KeyMapping mapping) {
+        return mapping == null ? "?" : mapping.getTranslatedKeyMessage().getString();
     }
 
     private void click(VisionConfig config, float pitch) {

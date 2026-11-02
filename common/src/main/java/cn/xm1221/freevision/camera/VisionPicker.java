@@ -53,11 +53,9 @@ public final class VisionPicker {
             return;
         }
 
+        // Vanilla's own reach (4.5, or 5.0 in creative). Never extended: an interaction the server
+        // would reject must never be attempted in the first place.
         double reach = minecraft.gameMode.getPickRange();
-
-        if (minecraft.gameMode.hasFarPickRange()) {
-            reach = 6.0D;
-        }
 
         Vec3 look = new Vec3(camera.getLookVector());
         Vec3 end = cameraPos.add(look.scale(reach));

@@ -34,10 +34,15 @@ public abstract class GameRendererMixin {
      * The hand model is welded to the player's eyes. With a detached camera it would float in
      * mid-air, so it is skipped - together with the first-person screen effects that live in the
      * same branch (suffocation overlay, spyglass, pumpkin blur).
+     *
+     * <p>Only when the camera is actually away from the head: a pose sitting on the eyes must keep
+     * the hand, otherwise the player is left with neither a hand nor a body.
      */
     @Inject(method = "renderItemInHand", at = @At("HEAD"), cancellable = true)
     private void freevision$hideFirstPersonHand(PoseStack poseStack, Camera camera, float partialTick, CallbackInfo callbackInfo) {
-        if (VisionController.get().isOverriding()) {
+        VisionController controller = VisionController.get();
+
+        if (controller.isOverriding() && controller.isRenderedDetached()) {
             callbackInfo.cancel();
         }
     }
