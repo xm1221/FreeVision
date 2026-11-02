@@ -106,9 +106,16 @@ $jar = Get-ChildItem "$env:USERPROFILE\.gradle\caches\fabric-loom\minecraftMaven
 2. 需要范围约束就写进 `sanitize()`（**一定要写**，配置是玩家可手改的）；
 3. 使用处读 `VisionConfig.get().settings.xxx`。
 
-### 加一个新的保存槽 / 改槽位语义
-`VisionConfig`：`maxSlots`、`storeActiveSlot`、`cycleSlot`、`activePreset`。
-槽位数量以 `maxSlots` 为准（空槽返回 `null`），文件名 `presets` 里缺的元素视为空槽。
+### 改保存的视角
+`VisionConfig` 只有一个 `pose` 字段（`null` = 还没存过）：
+
+- `pose()` / `hasPose()` 读；
+- `storePose(pose)` 写（内部 `copy()`，不会和别人共享可变对象）；
+- `clearPose()` 清空。
+
+旧版本用 `presets` 列表 + `activeSlot` 存多个槽位，`sanitise()` 会在加载时把选中的那条迁移到
+`pose` 并丢掉旧字段。**别再把它加回来**——多槽位那次把 `next_slot` 的默认值设成了 F9，
+和新的调整键撞在同一个键上，按键查表后者覆盖前者，按 F9 只会切槽位、进不了调整模式。
 
 ### 改机位数学（谨慎）
 全部在 `CameraPose`：
@@ -145,6 +152,7 @@ $jar = Get-ChildItem "$env:USERPROFILE\.gradle\caches\fabric-loom\minecraftMaven
 | Forge 拿事件总线要**构造器注入** | `FMLJavaModLoadingContext.get()` 在 47.4 已 `forRemoval`。`FMLModContainer.constructMod` 会先找 `getDeclaredConstructor(FMLJavaModLoadingContext.class)`，失败才退回无参构造——所以写成 `public FreeVisionForge(FMLJavaModLoadingContext context)` |
 | `pack.mcmeta` 放在**平台模块**而不是 common | 放 common 时 Forge 开发环境会报 `Missing metadata in pack mod:freevision`（dev 的 mod file 读不到 common 的资源目录）。放在 `fabric/`、`forge/` 各自的 `src/main/resources` 后，dev 与产物都安静，且每个 jar 里只有一个副本 |
 | Shift / Ctrl 可能是 `ToggleKeyMapping` | 开了"切换潜行/疾跑"后 `isDown()` 会一直为 true；读物理按键请用 `physicallyDown()` |
+| 两个动作绑同一个键＝前一个**静默死亡** | `KeyMapping` 的按键表由 `Options.keyMappings` 重建，后注册的覆盖先注册的。上一次多槽位版本把 `next_slot` 默认设成 F9，升级后它和新的 `edit`(F9) 撞车，按 F9 只会切槽位——这是"F8/F9 都没用"的真正原因，不是 Forge 的锅。`FreeVisionClient` 现在会在启动时对重复绑定打 WARN |
 | 别用 `isDown()` 判定模式切换 | 模式切换一律 `consumeClick()` + 去抖，且**一个 tick 只处理一次** |
 | 相机离眼睛 < 0.14 格时 `detached = false` | 否则玩家会看到自己脑袋的内壁；手模隐藏与它绑定，避免"没手也没身体" |
 | 配置是从磁盘来的脏数据 | 加载时 `sanitise()` 会把 1e6 / NaN 拉回来，否则每帧的裁剪射线会把客户端卡死 |

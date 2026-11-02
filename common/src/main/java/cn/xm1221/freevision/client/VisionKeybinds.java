@@ -30,9 +30,6 @@ public final class VisionKeybinds {
     /** Backspace: throw the current adjustment away. */
     public static KeyMapping discard;
 
-    /** F10: cycle between saved pose slots. */
-    public static KeyMapping nextSlot;
-
     /** Arrow keys: turn the camera without a mouse (keyboard-only / trackpad players). */
     public static KeyMapping lookUp;
     public static KeyMapping lookDown;
@@ -66,7 +63,6 @@ public final class VisionKeybinds {
         edit = make("freevision.key.edit", GLFW.GLFW_KEY_F9);
         lock = make("freevision.key.lock", GLFW.GLFW_KEY_V);
         discard = make("freevision.key.discard", GLFW.GLFW_KEY_BACKSPACE);
-        nextSlot = make("freevision.key.next_slot", GLFW.GLFW_KEY_F10);
         lookUp = make("freevision.key.look_up", GLFW.GLFW_KEY_UP);
         lookDown = make("freevision.key.look_down", GLFW.GLFW_KEY_DOWN);
         lookLeft = make("freevision.key.look_left", GLFW.GLFW_KEY_LEFT);
@@ -80,7 +76,7 @@ public final class VisionKeybinds {
 
     public static KeyMapping[] all() {
         return new KeyMapping[] {
-                vision, edit, lock, discard, nextSlot,
+                vision, edit, lock, discard,
                 lookUp, lookDown, lookLeft, lookRight,
                 dollyIn, dollyOut, rollLeft, rollRight, reset
         };

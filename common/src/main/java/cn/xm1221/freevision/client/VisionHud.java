@@ -58,7 +58,11 @@ public final class VisionHud {
 
         if (sculpting && config.settings.showPanel) {
             renderPanel(graphics, controller, config);
-        } else if (config.settings.showToasts) {
+        }
+
+        // Toasts keep their own slot: pressing the view-lock key or reset while adjusting still has
+        // to confirm what just happened, and the panel must not swallow that feedback.
+        if (config.settings.showToasts) {
             renderToast(graphics, controller);
         }
     }
@@ -70,8 +74,6 @@ public final class VisionHud {
         List<String> lines = new ArrayList<>();
 
         lines.add(tr("freevision.hud.sculpting"));
-        lines.add(Component.translatable("freevision.hud.slot",
-                config.activeSlot + 1, Math.max(1, config.settings.maxSlots)).getString());
         lines.add(String.format(Locale.ROOT, "%s %s   %s %+.1f°   %s %+.1f°   %s %+.1f°",
                 tr("freevision.hud.mode"),
                 tr(pose.absolute ? "freevision.hud.mode.absolute" : "freevision.hud.mode.relative"),

@@ -113,7 +113,7 @@ public final class VisionController {
 
         return switch (this.state) {
             case SCULPTING -> this.sculptPose;
-            case ACTIVE -> config.activePreset();
+            case ACTIVE -> config.pose();
             default -> null;
         };
     }
@@ -178,6 +178,7 @@ public final class VisionController {
     }
 
     private void handleKeys(Minecraft minecraft, VisionConfig config) {
+
         if (consume(VisionKeybinds.edit)) {
             long now = System.currentTimeMillis();
 
@@ -206,9 +207,6 @@ public final class VisionController {
             toggleLock(minecraft, config);
         }
 
-        if (consume(VisionKeybinds.nextSlot)) {
-            cycleSlot(config);
-        }
 
         if (consume(VisionKeybinds.discard)) {
             cancel();
@@ -262,7 +260,7 @@ public final class VisionController {
 
         if (this.state == VisionState.ACTIVE) {
             this.stateBeforeSculpt = VisionState.ACTIVE;
-            CameraPose active = config.activePreset();
+            CameraPose active = config.pose();
             this.sculptPose.set(active != null ? active : captureCamera(minecraft));
         } else if (this.state == VisionState.LEAVING && this.hasLastApplied) {
             // Re-entered mid-exit: keep the exact frame the player is looking at.
@@ -276,11 +274,12 @@ public final class VisionController {
         this.sculptPose.clamp(config.settings.maxOffset);
         this.blendFrom.set(this.sculptPose);
         this.state = VisionState.SCULPTING;
+        showHint("freevision.hint.editing", HINT_SHORT_MS, editKeyLabel(), discardKeyLabel());
     }
 
     private void finishSculpt(VisionConfig config) {
         this.sculptPose.clamp(config.settings.maxOffset);
-        config.storeActiveSlot(this.sculptPose);
+        config.storePose(this.sculptPose);
 
         if (!config.save()) {
             // Stay in edit mode so nothing is lost and the player can retry.
@@ -299,7 +298,7 @@ public final class VisionController {
     }
 
     private void activate(Minecraft minecraft, VisionConfig config) {
-        if (!config.hasPreset()) {
+        if (!config.hasPose()) {
             showHint("freevision.hint.no_preset", HINT_LONG_MS, editKeyLabel());
 
             return;
@@ -314,7 +313,7 @@ public final class VisionController {
     }
 
     private void deactivate(VisionConfig config) {
-        CameraPose origin = this.hasLastApplied ? this.lastApplied : config.activePreset();
+        CameraPose origin = this.hasLastApplied ? this.lastApplied : config.pose();
         this.blendFrom.set(origin != null ? origin : new CameraPose());
         this.state = VisionState.LEAVING;
         startTransition(config);
@@ -331,7 +330,7 @@ public final class VisionController {
         VisionConfig config = VisionConfig.get();
         this.blendFrom.set(this.sculptPose);
 
-        if (this.stateBeforeSculpt == VisionState.ACTIVE && config.hasPreset()) {
+        if (this.stateBeforeSculpt == VisionState.ACTIVE && config.hasPose()) {
             this.state = VisionState.ACTIVE;
         } else {
             this.state = VisionState.LEAVING;
@@ -364,14 +363,14 @@ public final class VisionController {
         }
 
         if (this.state == VisionState.ACTIVE) {
-            CameraPose active = config.activePreset();
+            CameraPose active = config.pose();
 
             if (active == null) {
                 return;
             }
 
             CameraPose converted = active.convertMode(!active.absolute, viewYaw, viewPitch);
-            config.storeActiveSlot(converted);
+            config.storePose(converted);
 
             if (!config.save()) {
                 showHint("freevision.hint.save_failed", HINT_LONG_MS);
@@ -387,39 +386,6 @@ public final class VisionController {
         }
 
         showHint("freevision.hint.lock_needs_view", HINT_LONG_MS, editKeyLabel());
-    }
-
-    private void cycleSlot(VisionConfig config) {
-        CameraPose previous = this.hasLastApplied ? this.lastApplied : config.activePreset();
-        int slot = config.cycleSlot(1);
-        config.save();
-
-        if (this.state == VisionState.ACTIVE) {
-            if (!config.hasPreset()) {
-                // The slot we landed on is empty: there is nothing to show, so fall back gracefully.
-                this.blendFrom.set(previous != null ? previous : this.sculptPose);
-                this.state = VisionState.LEAVING;
-                startTransition(config);
-                showHint("freevision.hint.slot_empty", HINT_LONG_MS, slot + 1);
-
-                return;
-            }
-
-            this.blendFrom.set(previous != null ? previous : this.sculptPose);
-            startTransition(config);
-        } else if (this.state.isSculpting()) {
-            // Keep the editor in sync with the slot it would now save into.
-            CameraPose loaded = config.activePreset();
-
-            if (loaded != null) {
-                this.sculptPose.set(loaded);
-                this.sculptPose.clamp(config.settings.maxOffset);
-                this.blendFrom.set(this.sculptPose);
-                this.blendDurationNs = 0L;
-            }
-        }
-
-        showHint("freevision.hint.slot", HINT_SHORT_MS, slot + 1, config.settings.maxSlots);
     }
 
     private void startTransition(VisionConfig config) {
@@ -690,6 +656,10 @@ public final class VisionController {
 
     private String editKeyLabel() {
         return label(VisionKeybinds.edit);
+    }
+
+    private String discardKeyLabel() {
+        return label(VisionKeybinds.discard);
     }
 
     private String visionKeyLabel() {

@@ -115,7 +115,6 @@ VANILLA ──(F9 调整)──▶ SCULPTING ──(F9/F8 保存)──▶ ACTIV
 | `vision` | F8 | 开关已保存视角 |
 | `edit` | F9 | 进入调整 / 保存 |
 | `lock` | V | 切换镜头锁定（绝对视角） |
-| `nextSlot` | F10 | 切换槽位 |
 | `rollLeft` / `rollRight` | `,` / `.` | 翻滚 |
 | `reset` | R | 机位归位 |
 
@@ -200,7 +199,7 @@ entity != camera.getEntity() || camera.isDetached() || ...
 
 ## 6. 可以怎么往下扩展
 
-- **更多保存位**：`VisionSettings.maxSlots` 已支持多槽，`presets` 是普通列表；想做轮盘，读它自己画。
+- **保存位扩展**：`VisionConfig` 只有一个 `pose`；想做多套预设，把它换成列表即可，状态机不用动。
 - **固定俯仰的过场机位**：用绝对锁定 + 指定 `pitchOffset` 即可，不需要改代码。
 - **跟随缓动**：在 `CameraPose#position()` 加时间常数做指数平滑；注意 `VisionPicker` 的射线段共享这个位置。
 - **新状态**：加进 `VisionState` 与 `VisionController#targetPose()`，渲染侧一行都不用改。
