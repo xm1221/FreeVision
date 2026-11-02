@@ -155,6 +155,8 @@ $jar = Get-ChildItem "$env:USERPROFILE\.gradle\caches\fabric-loom\minecraftMaven
 | 两个动作绑同一个键＝前一个**静默死亡** | `KeyMapping` 的按键表由 `Options.keyMappings` 重建，后注册的覆盖先注册的。上一次多槽位版本把 `next_slot` 默认设成 F9，升级后它和新的 `edit`(F9) 撞车，按 F9 只会切槽位——这是"F8/F9 都没用"的真正原因，不是 Forge 的锅。`FreeVisionClient` 现在会在启动时对重复绑定打 WARN |
 | **Forge 的 GUI 不是 `Gui`** | Forge 把 GUI 换成 `net.minecraftforge.client.gui.overlay.ForgeGui`，它**重写了 `render`** 且不调用 `Gui#render`。任何往 `Gui#render` 里注入的 HUD 在 Forge 上都是死代码（不报错、不崩溃、就是不显示）。HUD 必须走 Architectury 的 `ClientGuiEvent.RENDER_HUD`：Forge 侧它挂 `RenderGuiEvent.Post`，Fabric 侧挂 `Gui#render`。`GuiMixin` 里剩下的两个 `@Redirect` 只对 Fabric 有效（第一人称遮罩/准星），Forge 端由 Forge 自己的 overlay 系统接管 |
 | 排查"画不出来"先看钩子有没有被调用 | 加一条一次性 `LOG.info` 在 `VisionHud.render` 开头，跑一次看日志。这次就是靠它把范围从"渲染错误"缩到"钩子根本没跑" |
+| **不要用 `@Redirect`**（也不要任何 MixinExtras 注解） | MixinExtras **0.5.4** 在 `FactoryRedirectWrapperMixinTransformer` 里把 `@Redirect` 的 `at` 直接强转成 `AnnotationNode`：`(AnnotationNode) Annotations.getValue(redirect, "at")`。可 javac 对数组型元素写的是**列表**（`at=[@At(...)]`），于是 `ClassCastException`，目标类（这次是 `Gui`）转换失败 → **游戏启动崩溃**。0.5.5 修了，所以本地开发环境（Loader 自带 0.5.5）永远复现不出来。现在全部改用 `@Inject` + `@At`，并且打包检查过产物里 `spongepowered/asm/mixin/injection/Redirect` 与 `com/llamalad7/mixinextras` 都是 0 引用 |
+| 发布前扫一遍注解 | 解压 jar 里的 `cn/xm1221/freevision/mixin/*.class`，用文本搜 `injection/Redirect` 和 `com/llamalad7`，必须为空。这是"装进别人包里就能崩"的那类问题，自测跑不出来 |
 | 别用 `isDown()` 判定模式切换 | 模式切换一律 `consumeClick()` + 去抖，且**一个 tick 只处理一次** |
 | 相机离眼睛 < 0.14 格时 `detached = false` | 否则玩家会看到自己脑袋的内壁；手模隐藏与它绑定，避免"没手也没身体" |
 | 配置是从磁盘来的脏数据 | 加载时 `sanitise()` 会把 1e6 / NaN 拉回来，否则每帧的裁剪射线会把客户端卡死 |

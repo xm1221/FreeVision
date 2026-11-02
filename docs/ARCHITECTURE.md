@@ -165,8 +165,8 @@ entity != camera.getEntity() || camera.isDetached() || ...
 ### 4.2 藏掉贴着眼睛的手
 
 `GameRenderer#renderItemInHand` 整段 `cancel()`（同时带走一帧的投影矩阵重置，无害），
-`Gui#render` 里对 `Options#getCameraType()` 做一次 `@Redirect` 返回 `THIRD_PERSON_BACK`，
-于是手模、窒息遮罩、望远镜/南瓜遮罩都消失。**不改 `Options` 的真实值**，玩家的 F5 设置原样保留。
+南瓜模糊、望远镜边框这类贴屏特效由 `GuiOverlayMixin` 在各自方法的 HEAD 处 `cancel()`，
+两者都只在「镜头真的离开头部」时生效。**不改 `Options` 的真实值**，玩家的 F5 设置原样保留。
 
 ### 4.3 准星
 
@@ -184,8 +184,12 @@ HUD 走 Architectury 的 `ClientGuiEvent.RENDER_HUD`，而不是注入 `Gui#rend
 `ClientGuiEvent.RENDER_HUD` 在 Forge 侧由 `RenderGuiEvent.Post` 驱动、在 Fabric 侧由 Architectury 自己的
 注入驱动，两端都能拿到 `GuiGraphics`，是本项目里唯一一个真正跨平台的绘制入口。
 
-`GuiMixin` 里仍然保留的两个 `@Redirect`（第一人称遮罩、准星可见性）只对 Fabric 生效；
-Forge 的第一人称装饰由它自己的 overlay 系统绘制，属于已知的端差异。
+`GuiOverlayMixin` 用 `@Inject`（**不用 `@Redirect`**，原因见下）在 Fabric 上压掉南瓜/望远镜/粉雪贴屏特效；
+Forge 的这些装饰由它自己的 overlay 系统绘制，属于已知的端差异。
+
+> 为什么不写 `@Redirect`：MixinExtras 0.5.4 里 `FactoryRedirectWrapperMixinTransformer` 会把 `@Redirect` 的
+> `at` 直接强转成 `AnnotationNode`，而 javac 对数组型元素写的是列表，于是 `ClassCastException` 让目标类转换失败
+> ——装进任何一个捆了该版本的整合包就直接启动崩溃。本项目所有注入都只用 `@Inject` + `@At`。
 
 ---
 
@@ -202,7 +206,7 @@ Forge 的第一人称装饰由它自己的 overlay 系统绘制，属于已知�
 | `GameRendererMixin` | `GameRenderer#pick` | TAIL | 相机准星 |
 | `GameRendererMixin` | `GameRenderer#renderItemInHand` | HEAD/cancel | 藏掉第一人称手/遮罩 |
 | `GameRendererMixin` | `GameRenderer#bobView` | HEAD/cancel | 关掉跑动视角抖动 |
-| `GuiMixin` | `Gui#render` / `Gui#renderCrosshair` | Redirect | 第一人称装饰与准星（仅 Fabric，见下） |
+| `GuiOverlayMixin` | `Gui#renderSpyglassOverlay` / `#renderTextureOverlay` | HEAD/cancel | 第一人称贴屏特效（仅 Fabric，见下） |
 | `MouseHandlerMixin` | `MouseHandler#onScroll` | HEAD/cancel | 滚轮推拉机位 |
 
 翻滚在 `Camera#setRotation`（只认 yaw/pitch）之后，绕相机局部 Z 轴再旋转四元数一次，
