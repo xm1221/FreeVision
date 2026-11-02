@@ -40,6 +40,7 @@ public final class VisionHud {
     private VisionHud() {
     }
 
+
     public static void render(GuiGraphics graphics, float partialTick) {
         VisionConfig config = VisionConfig.get();
 

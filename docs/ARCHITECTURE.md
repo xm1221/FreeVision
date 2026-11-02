@@ -174,6 +174,19 @@ entity != camera.getEntity() || camera.isDetached() || ...
 （创造/旁观按原版 5/6 格），方块用 `Block.OUTLINE`、实体用 `ProjectileUtil.getEntityHitResult`，取更近者。
 **安全边界**：命中点如果离玩家眼睛超过原版手长，直接放弃、保留原版结果——永远不会发出服务端会拒绝的交互。
 
+### 4.4 HUD：唯一一处刻意不用 mixin 的地方
+
+HUD 走 Architectury 的 `ClientGuiEvent.RENDER_HUD`，而不是注入 `Gui#render`。
+
+原因不是偷懒，是被 Forge 教做人：Forge 把 `Minecraft.gui` 换成了
+`net.minecraftforge.client.gui.overlay.ForgeGui`，它**重写了 `render` 且不再调用 `Gui#render`**。
+任何挂在 `Gui#render` 上的注入在 Forge 端都是死代码——不报错、不崩溃、就是不显示，最难查。
+`ClientGuiEvent.RENDER_HUD` 在 Forge 侧由 `RenderGuiEvent.Post` 驱动、在 Fabric 侧由 Architectury 自己的
+注入驱动，两端都能拿到 `GuiGraphics`，是本项目里唯一一个真正跨平台的绘制入口。
+
+`GuiMixin` 里仍然保留的两个 `@Redirect`（第一人称遮罩、准星可见性）只对 Fabric 生效；
+Forge 的第一人称装饰由它自己的 overlay 系统绘制，属于已知的端差异。
+
 ---
 
 ## 5. 注入点总表
@@ -189,7 +202,7 @@ entity != camera.getEntity() || camera.isDetached() || ...
 | `GameRendererMixin` | `GameRenderer#pick` | TAIL | 相机准星 |
 | `GameRendererMixin` | `GameRenderer#renderItemInHand` | HEAD/cancel | 藏掉第一人称手/遮罩 |
 | `GameRendererMixin` | `GameRenderer#bobView` | HEAD/cancel | 关掉跑动视角抖动 |
-| `GuiMixin` | `Gui#render` | TAIL + Redirect | HUD 与第一人称装饰 |
+| `GuiMixin` | `Gui#render` / `Gui#renderCrosshair` | Redirect | 第一人称装饰与准星（仅 Fabric，见下） |
 | `MouseHandlerMixin` | `MouseHandler#onScroll` | HEAD/cancel | 滚轮推拉机位 |
 
 翻滚在 `Camera#setRotation`（只认 yaw/pitch）之后，绕相机局部 Z 轴再旋转四元数一次，

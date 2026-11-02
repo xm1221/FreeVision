@@ -4,29 +4,22 @@ import cn.xm1221.freevision.camera.VisionController;
 import net.minecraft.client.CameraType;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.Gui;
-import net.minecraft.client.gui.GuiGraphics;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Draws the overlay and keeps first-person-only decorations off the screen while the custom
- * perspective is applied (pumpkin blur, spyglass frame) - while keeping the crosshair.
+ * Keeps first-person-only decorations off the screen while the custom perspective is applied
+ * (pumpkin blur, spyglass frame) and keeps the crosshair visible.
  *
- * <p>Two separate redirects are needed because {@code Gui} asks for the camera type twice:
- * {@code render} guards the first-person overlays, {@code renderCrosshair} skips the crosshair in
- * third person. Covering only the first one would make the crosshair vanish for every player who
- * keeps F5 on while using FreeVision.
+ * <p>Both redirects target {@code Gui}, which is <b>Fabric-only territory</b>: Forge swaps the GUI
+ * for {@code ForgeGui}, which overrides {@code render} and never calls {@code Gui#render}, so these
+ * injections are inert there. The HUD therefore does not live here - it is drawn from Architectury's
+ * {@code ClientGuiEvent.RENDER_HUD}, which is routed to {@code RenderGuiEvent.Post} on Forge and to
+ * this class's {@code Gui#render} on Fabric.
  */
 @Mixin(Gui.class)
 public abstract class GuiMixin {
-    @Inject(method = "render", at = @At("TAIL"))
-    private void freevision$renderOverlay(GuiGraphics graphics, float partialTick, CallbackInfo callbackInfo) {
-        cn.xm1221.freevision.client.VisionHud.render(graphics, partialTick);
-    }
-
     @Redirect(
             method = "render",
             at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Options;getCameraType()Lnet/minecraft/client/CameraType;")

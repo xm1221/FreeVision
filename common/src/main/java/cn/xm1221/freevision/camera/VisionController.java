@@ -1,5 +1,6 @@
 package cn.xm1221.freevision.camera;
 
+import cn.xm1221.freevision.FreeVision;
 import cn.xm1221.freevision.client.VisionKeybinds;
 import cn.xm1221.freevision.config.VisionConfig;
 import cn.xm1221.freevision.config.VisionSettings;
@@ -136,6 +137,7 @@ public final class VisionController {
     public void markLeft() {
         if (this.state == VisionState.LEAVING) {
             this.state = VisionState.VANILLA;
+            FreeVision.LOG.info("FreeVision state -> {}", this.state);
         }
     }
 
@@ -274,6 +276,7 @@ public final class VisionController {
         this.sculptPose.clamp(config.settings.maxOffset);
         this.blendFrom.set(this.sculptPose);
         this.state = VisionState.SCULPTING;
+        FreeVision.LOG.info("FreeVision state -> {}", this.state);
         showHint("freevision.hint.editing", HINT_SHORT_MS, editKeyLabel(), discardKeyLabel());
     }
 
@@ -292,6 +295,7 @@ public final class VisionController {
         this.stateBeforeSculpt = VisionState.ACTIVE;
         this.blendFrom.set(this.sculptPose);
         this.blendDurationNs = 0L;
+        FreeVision.LOG.info("FreeVision state -> {} (saved)", this.state);
 
         click(config, 1.5F);
         showHint("freevision.hint.saved", HINT_SHORT_MS, visionKeyLabel());
@@ -307,6 +311,7 @@ public final class VisionController {
         this.blendFrom.set(captureCamera(minecraft));
         this.state = VisionState.ACTIVE;
         this.stateBeforeSculpt = VisionState.ACTIVE;
+        FreeVision.LOG.info("FreeVision state -> {}", this.state);
         startTransition(config);
         click(config, 1.2F);
         showHint("freevision.hint.active", HINT_SHORT_MS, visionKeyLabel());
@@ -316,6 +321,7 @@ public final class VisionController {
         CameraPose origin = this.hasLastApplied ? this.lastApplied : config.pose();
         this.blendFrom.set(origin != null ? origin : new CameraPose());
         this.state = VisionState.LEAVING;
+        FreeVision.LOG.info("FreeVision state -> {}", this.state);
         startTransition(config);
         click(config, 0.9F);
         showHint("freevision.hint.inactive", HINT_SHORT_MS, visionKeyLabel());
